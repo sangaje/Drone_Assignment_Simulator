@@ -203,5 +203,73 @@ class TestUserDefinedAssignment(unittest.TestCase):
         self.assertEqual(len(result.unassigned_tasks), 1)
 
 
+class TestMILPAssignment(unittest.TestCase):
+    """Test MILPAssignment strategy."""
+    
+    def setUp(self):
+        """Check if pulp is available."""
+        try:
+            import pulp
+            self.pulp_available = True
+        except ImportError:
+            self.pulp_available = False
+    
+    def test_milp_assignment_basic(self):
+        """Test MILP assignment on a simple problem."""
+        if not self.pulp_available:
+            self.skipTest("pulp library not available")
+        
+        from drone_simulator.strategies import MILPAssignment
+        
+        problem = AssignmentProblem()
+        
+        # Create drones
+        drone1 = Drone(drone_id=0, location=Location(0, 0), max_capacity=2.0)
+        drone2 = Drone(drone_id=1, location=Location(10, 10), max_capacity=2.0)
+        problem.add_drone(drone1)
+        problem.add_drone(drone2)
+        
+        # Create tasks
+        task1 = Task(task_id=0, location=Location(1, 1), load_requirement=1.0)
+        task2 = Task(task_id=1, location=Location(11, 11), load_requirement=1.0)
+        problem.add_task(task1)
+        problem.add_task(task2)
+        
+        strategy = MILPAssignment()
+        result = strategy.solve(problem)
+        
+        self.assertEqual(len(result.assignments), 2)
+        self.assertEqual(len(result.unassigned_tasks), 0)
+        self.assertEqual(result.metadata.get('solver_status'), 'Optimal')
+    
+    def test_milp_respects_capacity(self):
+        """Test that MILP respects capacity constraints."""
+        if not self.pulp_available:
+            self.skipTest("pulp library not available")
+        
+        from drone_simulator.strategies import MILPAssignment
+        
+        problem = AssignmentProblem()
+        
+        # Create a drone with limited capacity
+        drone = Drone(drone_id=0, location=Location(0, 0), max_capacity=1.0)
+        problem.add_drone(drone)
+        
+        # Create tasks that exceed capacity if all assigned
+        for i in range(3):
+            task = Task(task_id=i, location=Location(i, i), load_requirement=0.5)
+            problem.add_task(task)
+        
+        strategy = MILPAssignment()
+        result = strategy.solve(problem)
+        
+        # Should only assign 2 tasks (total load = 1.0)
+        self.assertLessEqual(len(result.assignments), 2)
+        
+        # Verify capacity constraint
+        total_load = sum(a.task.load_requirement for a in result.assignments)
+        self.assertLessEqual(total_load, 1.0)
+
+
 if __name__ == '__main__':
     unittest.main()

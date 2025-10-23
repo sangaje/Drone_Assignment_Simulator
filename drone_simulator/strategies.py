@@ -230,17 +230,25 @@ class MILPAssignment(AssignmentStrategy):
             for j, task in enumerate(problem.tasks):
                 x[i, j] = pulp.LpVariable(f"x_{i}_{j}", cat='Binary')
         
-        # Objective: minimize total cost
+        # Decision variables: y[j] = 1 if task j is unassigned
+        y = {}
+        for j, task in enumerate(problem.tasks):
+            y[j] = pulp.LpVariable(f"y_{j}", cat='Binary')
+        
+        # Objective: minimize total cost + penalty for unassigned tasks
         cost_matrix = problem.get_cost_matrix()
+        max_cost = max(max(row) for row in cost_matrix) if cost_matrix else 1.0
+        penalty = max_cost * 10  # Large penalty for unassigned tasks
+        
         lp_problem += pulp.lpSum(
             cost_matrix[i][j] * x[i, j]
             for i in range(len(problem.drones))
             for j in range(len(problem.tasks))
-        )
+        ) + pulp.lpSum(penalty * y[j] for j in range(len(problem.tasks)))
         
-        # Constraint: Each task assigned to at most one drone
+        # Constraint: Each task either assigned to one drone or marked unassigned
         for j in range(len(problem.tasks)):
-            lp_problem += pulp.lpSum(x[i, j] for i in range(len(problem.drones))) <= 1
+            lp_problem += pulp.lpSum(x[i, j] for i in range(len(problem.drones))) + y[j] == 1
         
         # Constraint: Drone capacity
         for i, drone in enumerate(problem.drones):
