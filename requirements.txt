@@ -1,0 +1,12 @@
+# Core dependencies (none required for basic functionality)
+
+# Optional dependencies for enhanced functionality:
+# - For MILP optimization (uncomment to install):
+# pulp>=2.7.0
+
+# - For visualization (uncomment to install):
+# matplotlib>=3.5.0
+
+# Development dependencies (uncomment for development):
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
