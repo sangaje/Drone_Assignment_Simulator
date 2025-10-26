@@ -78,3 +78,17 @@ class BatteryStatus:
             WattHour: Current charge level in Watt-Hours.
         """
         return self._current
+
+    @current.setter
+    def current(self, wh: Energy):
+        """Set the current battery charge level.
+
+        Args:
+            wh (WattHour): New charge level in Watt-Hours.
+
+        Raises:
+            ValueError: If the new charge level exceeds capacity or is negative.
+        """
+        if wh < ZERO_ENERGY:
+            raise ValueError
+        self._current.from_si(min(float(self._capacity), float(wh)))
