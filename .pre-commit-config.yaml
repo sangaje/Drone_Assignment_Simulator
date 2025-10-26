@@ -1,0 +1,28 @@
+# =============================================================================
+# PRE-COMMIT HOOK REPOSITORIES - External tools for code quality enforcement
+# =============================================================================
+
+repos:
+  # Ruff - Fast Python Linter
+  # Enforces style and catches errors in Python code
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.4                # Locked version for consistency
+    hooks:
+      - id: ruff  # linting (ruff check)
+        name: ruff-lint
+        args: [--no-cache]
+        language_version: python3
+      - id: ruff-format  # formatting (ruff format)
+        name: ruff-fmt
+        language_version: python3
+
+  # MyPy - Static Type Checker
+  # Performs static type analysis to catch type-related errors
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2                  # Locked version for consistency
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - sqlalchemy
+        language_version: python3  # Use Python 3 for type checking
+        files: \.py$               # Apply only to Python files

@@ -1,0 +1,118 @@
+[project]
+name = "drone_sim"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "sangaje",email = "qhals8380@gmail.com"},
+]
+dependencies = ["simpy>=4.1.1"]
+requires-python = "==3.12.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.1",
+    "mypy>=1.18.2",
+    "pre-commit>=4.3.0",
+    "docformatter>=1.7.7",
+]
+
+# =============================================================================
+# RUFF CONFIGURATION - Settings for the ruff linter
+# =============================================================================
+
+[tool.ruff]
+src = ["app", "tests"]    # Specify the source directory for the project
+target-version = "py312"  # Specify the target Python version for linting
+line-length = 100         # Set the maximum line length for code style
+indent-width = 4          # Indentation width for code style
+extend-include = ["*.py"] # Include all Python files for linting
+fix = true
+
+[tool.ruff.lint]
+
+select = [
+  "F",   # Pyflakes - catches logical errors, undefined names, and unused imports
+  "E",   # pycodestyle errors - PEP 8 style violations (syntax errors)
+  "W",   # pycodestyle warnings - PEP 8 style warnings (formatting issues)
+  "I",   # isort - import sorting and organization
+  "B",   # flake8-bugbear - additional bug and design problems
+  "C4",  # flake8-comprehensions - better list/dict/set comprehensions
+  "UP",  # pyupgrade - modernize Python syntax for newer versions
+  "D",   # pydocstyle - docstring conventions and documentation style
+  "N",   # pep8-naming - enforce PEP 8 naming conventions
+  "ARG", # flake8-unused-arguments - detect unused function arguments
+  "TRY", # tryceratops - exception handling best practices
+  "RSE", # flake8-raise - improve raise statement usage
+  "RET", # flake8-return - improve return statement usage
+]
+
+ignore = [
+  "D203", # one-blank-line-before-class - conflicts with Google style docstrings
+  "D213", # multi-line-docstring-summary - conflicts with Google style docstrings
+]
+
+per-file-ignores = { "__init__.py" = [
+  "F401",
+] } # Allow unused imports in __init__.py files
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+[tool.ruff.format]
+line-ending = "lf"
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = 100
+
+# =============================================================================
+# MYPY CONFIGURATION - Settings for the mypy type checker
+# =============================================================================
+
+[tool.mypy]
+ignore_missing_imports = true
+warn_unused_ignores = true
+strict_optional = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+show_error_codes = true
+plugins = ["sqlalchemy.ext.mypy.plugin"]
+
+
+# =============================================================================
+# PDM CONFIGURATION - Settings for PDM package management
+# =============================================================================
+
+[tool.pdm.scripts]
+help = "ec"
+lint = "pdm run ruff check --fix ."
+fmt-code = "pdm run ruff format ."
+fmt-docstrings = "pdm run docformatter --in-place --wrap-summaries 100 --wrap-descriptions 100 --recursive ."
+type-check = "pdm run mypy ."
+test = "pdm run pytest"
+
+[tool.pdm.build]
+includes = ["app"]
+
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+# Do not Change the following lines unless you know what you are doing.
+# [tool.pdm]
+# distribution = false
