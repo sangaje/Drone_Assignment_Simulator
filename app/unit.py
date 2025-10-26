@@ -74,9 +74,20 @@ class Unit:
 
     @classmethod
     def _check_same_root(cls, unit_type: type[Unit]):
-        """Check if two unit types belong to the same physical quantity family."""
+        """Check if two unit types belong to the same physical quantity family.
+
+        This method ensures type safety by verifying that operations are only
+        performed between units of the same physical quantity (e.g., length
+        units with length units, angle units with angle units).
+
+        Args:
+            unit_type: The other unit type to check compatibility with.
+
+        Raises:
+            TypeError: If the units belong to different physical quantity families.
+        """
         if cls.ROOT is not unit_type.ROOT:
-            msg = f"TypeError: {cls, unit_type}"
+            msg = f"TypeError: {cls.ROOT, unit_type.ROOT}"
             raise TypeError(msg)
 
 
@@ -147,46 +158,258 @@ class UnitFloat(float, Unit):
 
     # -------------------------------- Arithmetic Operations --------------------------------
     def __add__(self, other: UnitFloat) -> UnitFloat:
-        """Add two units of the same family."""
+        """Add two units of the same family.
+
+        Args:
+            other: Unit value to add to this unit.
+
+        Returns:
+            UnitFloat: Sum of the two units.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
         self._check_same_root(type(other))
         return type(self).from_si(float(self) + float(other))
 
     def __radd__(self, other: UnitFloat) -> UnitFloat:
-        """Right-side addition for units."""
+        """Right-side addition for units.
+
+        Args:
+            other: Unit value to add to this unit.
+
+        Returns:
+            UnitFloat: Sum of the two units.
+        """
         return self.__add__(other)
 
     def __sub__(self, other: UnitFloat) -> UnitFloat:
-        """Subtract two units of the same family."""
+        """Subtract two units of the same family.
+
+        Args:
+            other: Unit value to subtract from this unit.
+
+        Returns:
+            UnitFloat: Difference of the two units.
+        """
         self._check_same_root(type(other))
         return type(self).from_si(float(self) - float(other))
 
     def __rsub__(self, other: UnitFloat) -> UnitFloat:
-        """Right-side subtraction for units."""
+        """Right-side subtraction for units.
+
+        Args:
+            other: Unit value that this unit is subtracted from.
+
+        Returns:
+            UnitFloat: Difference with other as minuend.
+        """
         self._check_same_root(type(other))
         return type(self).from_si(float(other) - float(self))
 
     def __mul__(self, k: Number) -> UnitFloat:
-        """Multiply unit by scalar value."""
+        """Multiply unit by scalar value.
+
+        Args:
+            k: Numeric scalar to multiply by.
+
+        Returns:
+            UnitFloat: Unit scaled by the factor.
+
+        Raises:
+            TypeError: If k is not a numeric type.
+        """
         if isinstance(k, Number):
             return type(self).from_si(float(self) * float(k))
         raise TypeError
 
     def __rmul__(self, k: Number) -> UnitFloat:
-        """Right-side multiplication by scalar."""
+        """Right-side multiplication by scalar.
+
+        Args:
+            k: Numeric scalar to multiply by.
+
+        Returns:
+            UnitFloat: Unit scaled by the factor.
+        """
         return self.__mul__(k)
 
     def __truediv__(self, k: Number) -> UnitFloat:
-        """Divide unit by scalar value."""
+        """Divide unit by scalar value.
+
+        Args:
+            k: Numeric scalar to divide by.
+
+        Returns:
+            UnitFloat: Unit divided by the scalar.
+
+        Raises:
+            TypeError: If k is not a numeric type.
+        """
         if isinstance(k, Number):
             return type(self).from_si(float(self) / float(k))
         raise TypeError
 
+    def __iadd__(self, other: UnitFloat) -> UnitFloat:
+        """In-place addition with another unit of the same family.
+
+        Args:
+            other: Unit value to add to this unit.
+
+        Returns:
+            UnitFloat: This unit modified by addition.
+        """
+        self._check_same_root(type(other))
+        return type(self).from_si(float(self) + float(other))
+
+    def __isub__(self, other: UnitFloat) -> UnitFloat:
+        """In-place subtraction with another unit of the same family.
+
+        Args:
+            other: Unit value to subtract from this unit.
+
+        Returns:
+            UnitFloat: This unit modified by subtraction.
+        """
+        self._check_same_root(type(other))
+        return type(self).from_si(float(self) - float(other))
+
+    def __imul__(self, k: Number) -> UnitFloat:
+        """In-place multiplication with a scalar value.
+
+        Args:
+            k: Numeric scalar to multiply by.
+
+        Returns:
+            UnitFloat: This unit scaled by the factor.
+
+        Raises:
+            TypeError: If k is not a numeric type.
+        """
+        if isinstance(k, Number):
+            return type(self).from_si(float(self) * float(k))
+        raise TypeError
+
+    def __itruediv__(self, k: Number) -> UnitFloat:
+        """In-place division with a scalar value.
+
+        Args:
+            k: Numeric scalar to divide by.
+
+        Returns:
+            UnitFloat: This unit divided by the scalar.
+
+        Raises:
+            TypeError: If k is not a numeric type.
+        """
+        if isinstance(k, Number):
+            return type(self).from_si(float(self) / float(k))
+        raise TypeError
+
+    def __lt__(self, other: UnitFloat) -> bool:
+        """Less-than comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit is less than the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) < float(other)
+
+    def __le__(self, other: UnitFloat) -> bool:
+        """Less-than-or-equal comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit is less than or equal to the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) <= float(other)
+
+    def __gt__(self, other: UnitFloat) -> bool:
+        """Greater-than comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit is greater than the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) > float(other)
+
+    def __ge__(self, other: UnitFloat) -> bool:
+        """Greater-than-or-equal comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit is greater than or equal to the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) >= float(other)
+
+    def __eq__(self, other: UnitFloat) -> bool:
+        """Equality comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit equals the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) == float(other)
+
+    def __ne__(self, other: UnitFloat) -> bool:
+        """Not-equal comparison between two units of the same family.
+
+        Args:
+            other: Unit value to compare against.
+
+        Returns:
+            bool: True if this unit does not equal the other.
+
+        Raises:
+            TypeError: If units are not from the same family.
+        """
+        self._check_same_root(type(other))
+        return float(self) != float(other)
+
     def __str__(self) -> str:
-        """Return string representation in the unit's native scale."""
+        """Return human-readable string representation in the unit's native scale.
+
+        Returns:
+            str: Value and symbol in the unit's natural scale (e.g., "90.0 °").
+        """
         return f"{self.to(type(self))} {type(self).SYMBOL}".strip()
 
     def __repr__(self) -> str:
-        """Return string representation showing both native and SI values."""
+        """Return detailed string representation showing both native and SI values.
+
+        Returns:
+            str: Value in native scale with SI equivalent (e.g., "90 ° (= 1.5708 SI)").
+        """
         return f"{self.to(type(self)):g} {type(self).SYMBOL} (= {float(self):g} SI)"
 
 
@@ -207,7 +430,7 @@ class Degree(Radian):
 
 
 # Union type for angle units (defined after classes are created)
-Angle = Radian | Degree
+Angle = Radian | Degree  # Type alias for any angle unit (radians or degrees)
 # ---------------------------------------------------------------------------------
 
 
@@ -226,7 +449,8 @@ class Kilometer(Meter):
     SCALE_TO_SI = 1000.0
     SYMBOL = "km"
 
-Length = Meter | Kilometer
+
+Length = Meter | Kilometer  # Type alias for any length unit
 
 # ---------------------------------------------------------------------------------
 
@@ -253,6 +477,7 @@ class Hour(Second):
     SCALE_TO_SI = 3600.0
     SYMBOL = "h"
 
-Time = Second | Minute | Hour
+
+Time = Second | Minute | Hour  # Type alias for any time unit
 
 # ---------------------------------------------------------------------------------

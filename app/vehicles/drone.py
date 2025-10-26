@@ -5,7 +5,8 @@ in the discrete event simulation. Drones have battery management capabilities,
 positioning systems, and can perform various tasks within the simulation environment.
 """
 
-from app.types import BatteryStatus, Position
+from app.energy.battery import BatteryStatus
+from app.geo import GeoPoint
 import simpy as sp
 
 
@@ -25,10 +26,10 @@ class Drone:
 
     env: sp.Environment
     id: int
-    position: Position
+    position: GeoPoint
     battery: BatteryStatus
 
-    def __init__(self, env: sp.Environment, pos: Position, battery: BatteryStatus):
+    def __init__(self, env: sp.Environment, pos: GeoPoint, battery: BatteryStatus):
         """Initialize a new Drone instance.
 
         Args:

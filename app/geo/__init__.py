@@ -97,6 +97,56 @@ class GeoPoint:
     latitude: Latitude
     longitude: Longitude
 
+    @classmethod
+    def from_deg(cls, lat: float, lon: float) -> "GeoPoint":
+        """Create a GeoPoint from latitude and longitude values in degrees.
+
+        Convenience constructor for creating GeoPoint instances from decimal
+        degree coordinates, which is the most common format for geographic data.
+
+        Args:
+            lat (float): Latitude in decimal degrees (-90 to +90).
+                        Negative values represent South, positive North.
+            lon (float): Longitude in decimal degrees (-180 to +180).
+                        Negative values represent West, positive East.
+
+        Returns:
+            GeoPoint: New geographic point with the specified coordinates.
+
+        Example:
+            >>> # Seoul coordinates
+            >>> seoul = GeoPoint.from_deg(37.5665, 126.9780)
+            >>> # Antarctic research station (negative latitude)
+            >>> mcmurdo = GeoPoint.from_deg(-77.8419, 166.6863)
+        """
+        return cls(Latitude(lat), Longitude(lon))
+
+    @classmethod
+    def from_rad(cls, lat: float, lon: float) -> "GeoPoint":
+        """Create a GeoPoint from latitude and longitude values in radians.
+
+        Alternative constructor for creating GeoPoint instances from radian
+        coordinates, useful when working with mathematical calculations or
+        data sources that provide coordinates in radians.
+
+        Args:
+            lat (float): Latitude in radians (-π/2 to +π/2).
+                        Negative values represent South, positive North.
+            lon (float): Longitude in radians (-π to +π).
+                        Negative values represent West, positive East.
+
+        Returns:
+            GeoPoint: New geographic point with coordinates converted from radians.
+
+        Example:
+            >>> import math
+            >>> # Create point using radian values
+            >>> point = GeoPoint.from_rad(math.pi/4, math.pi/3)  # 45°N, 60°E
+            >>> print(point)
+            GeoPoint(latitude=45.0 °N/S, longitude=60.0 °E/W)
+        """
+        return cls(Radian(lat).to(Latitude), Radian(lon).to(Longitude))
+
     def distance_to(self, other: "GeoPoint") -> Meter:
         """Calculate the geodesic distance to another GeoPoint.
 
@@ -205,52 +255,51 @@ class GeoPoint:
         self.latitude = Latitude.from_si(lat)  # lat is already in radians
         self.longitude = Longitude.from_si(lon)  # lon is already in radians
 
-    @classmethod
-    def from_deg(cls, lat: float, lon: float) -> "GeoPoint":
-        """Create a GeoPoint from latitude and longitude values in degrees.
+    def passed_through_target(
+        self, start_point: "GeoPoint", target: "GeoPoint"
+    ) -> bool:
+        """Check if movement from start_point to current position passed through target.
 
-        Convenience constructor for creating GeoPoint instances from decimal
-        degree coordinates, which is the most common format for geographic data.
-
-        Args:
-            lat (float): Latitude in decimal degrees (-90 to +90).
-                        Negative values represent South, positive North.
-            lon (float): Longitude in decimal degrees (-180 to +180).
-                        Negative values represent West, positive East.
-
-        Returns:
-            GeoPoint: New geographic point with the specified coordinates.
-
-        Example:
-            >>> # Seoul coordinates
-            >>> seoul = GeoPoint.from_deg(37.5665, 126.9780)
-            >>> # Antarctic research station (negative latitude)
-            >>> mcmurdo = GeoPoint.from_deg(-77.8419, 166.6863)
-        """
-        return cls(Latitude(lat), Longitude(lon))
-
-    @classmethod
-    def from_rad(cls, lat: float, lon: float) -> "GeoPoint":
-        """Create a GeoPoint from latitude and longitude values in radians.
-
-        Alternative constructor for creating GeoPoint instances from radian
-        coordinates, useful when working with mathematical calculations or
-        data sources that provide coordinates in radians.
+        This method checks if the target point is within the rectangular bounding box
+        formed by the start position and current position. This is useful for discrete
+        time simulations where you need to detect if a drone passed through a waypoint
+        between simulation steps.
 
         Args:
-            lat (float): Latitude in radians (-π/2 to +π/2).
-                        Negative values represent South, positive North.
-            lon (float): Longitude in radians (-π to +π).
-                        Negative values represent West, positive East.
+            start_point (GeoPoint): Previous position before movement.
+            target (GeoPoint): Target point to check for passage.
 
         Returns:
-            GeoPoint: New geographic point with coordinates converted from radians.
+            bool: True if target is within the bounding box of the movement path.
 
         Example:
-            >>> import math
-            >>> # Create point using radian values
-            >>> point = GeoPoint.from_rad(math.pi/4, math.pi/3)  # 45°N, 60°E
-            >>> print(point)
-            GeoPoint(latitude=45.0 °N/S, longitude=60.0 °E/W)
+            >>> # Drone movement simulation
+            >>> drone = GeoPoint.from_deg(37.5665, 126.9780)
+            >>> start_pos = GeoPoint.from_deg(37.5665, 126.9780)  # Save start position
+            >>> target = GeoPoint.from_deg(37.5675, 126.9790)    # Waypoint
+            >>>
+            >>> # Drone moves during simulation step
+            >>> drone.move_to(Degree(45), Meter(2000))  # Move northeast 2km
+            >>>
+            >>> # Check if drone passed through waypoint
+            >>> if drone.passed_through_target(start_pos, target):
+            ...     print("Waypoint reached!")
+            Waypoint reached!
         """
-        return cls(Radian(lat).to(Latitude), Radian(lon).to(Longitude))
+        # Get coordinates as float values for comparison
+        start_lat = float(start_point.latitude)
+        start_lon = float(start_point.longitude)
+        current_lat = float(self.latitude)
+        current_lon = float(self.longitude)
+        target_lat = float(target.latitude)
+        target_lon = float(target.longitude)
+
+        # Check if target is within the bounding box
+        lat_in_range = (
+            min(start_lat, current_lat) <= target_lat <= max(start_lat, current_lat)
+        )
+        lon_in_range = (
+            min(start_lon, current_lon) <= target_lon <= max(start_lon, current_lon)
+        )
+
+        return lat_in_range and lon_in_range
