@@ -16,6 +16,7 @@ Key features:
 - Battery health diagnostics
 - Temperature effects on battery performance
 """
+
 from .unit import ZERO_ENERGY, Energy
 
 
@@ -90,9 +91,11 @@ class BatteryStatus:
             ValueError: If the new charge level exceeds capacity or is negative.
         """
         if wh < ZERO_ENERGY:
-            raise ValueError("Battery charge cannot be negative")
+            msg = "Battery charge cannot be negative"
+            raise ValueError(msg)
         if wh > self._capacity:
-            raise ValueError("Battery charge cannot exceed capacity")
+            msg = "Battery charge cannot exceed capacity"
+            raise ValueError(msg)
         self._current = wh
 
     def consume_energy(self, energy: Energy) -> bool:
@@ -105,10 +108,13 @@ class BatteryStatus:
             bool: True if energy was successfully consumed, False if insufficient charge.
         """
         if energy < ZERO_ENERGY:
-            raise ValueError("Energy consumption cannot be negative")
-        
+            msg = "Energy consumption cannot be negative"
+            raise ValueError(msg)
+
         if self._current >= energy:
-            self._current = type(self._current).from_si(float(self._current) - float(energy))
+            self._current = type(self._current).from_si(
+                float(self._current) - float(energy)
+            )
             return True
         return False
 
@@ -119,15 +125,22 @@ class BatteryStatus:
             energy (Energy): Amount of energy to add to the battery.
 
         Returns:
-            Energy: Amount of energy actually added (may be less than requested if capacity reached).
+            Energy: Amount of energy actually added (may be less than requested if capacity reached)
         """
         if energy < ZERO_ENERGY:
-            raise ValueError("Charge energy cannot be negative")
-        
-        available_capacity = type(self._capacity).from_si(float(self._capacity) - float(self._current))
-        actual_charge = type(energy).from_si(min(float(energy), float(available_capacity)))
-        
-        self._current = type(self._current).from_si(float(self._current) + float(actual_charge))
+            msg = "Charge energy cannot be negative"
+            raise ValueError(msg)
+
+        available_capacity = type(self._capacity).from_si(
+            float(self._capacity) - float(self._current)
+        )
+        actual_charge = type(energy).from_si(
+            min(float(energy), float(available_capacity))
+        )
+
+        self._current = type(self._current).from_si(
+            float(self._current) + float(actual_charge)
+        )
         return actual_charge
 
     def is_empty(self) -> bool:
