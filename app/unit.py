@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from math import pi
 from typing import ClassVar
+from config import BASE_TYPE
 
 Number = int | float
 
@@ -90,21 +91,15 @@ class Unit:
             msg = f"TypeError: {cls.ROOT, unit_type.ROOT}"
             raise TypeError(msg)
 
+class Quantity(Unit):
+    """Base class for physical quantities in the simulation.
 
-class UnitFloat(float, Unit):
-    """Base class for type-safe unit calculations with automatic SI conversion.
-
-    This class stores values internally in SI units while allowing operations
-    only between compatible unit types (same 'root' family). It provides
-    automatic conversion between different units of the same physical quantity.
-
-    Attributes:
-        ROOT (ClassVar[type[UnitFloat]]): Root class defining the unit family.
-        SCALE_TO_SI (ClassVar[float]): Conversion factor to SI units.
-        SYMBOL (ClassVar[str]): Unit symbol for display purposes.
-        IS_FAMILY_ROOT (ClassVar[bool]): Indicates if this class is a root unit.
+    This class serves as an abstract base for physical quantity types
+    that don't require automatic conversion to float values. It inherits
+    the ROOT assignment and type checking capabilities from Unit while
+    allowing for more complex quantity representations.
     """
-
+    BASE_TYPE : ClassVar[type] = float
     SCALE_TO_SI: ClassVar[float] = 1.0
     IS_FAMILY_ROOT: ClassVar[bool] = True
 
@@ -117,8 +112,8 @@ class UnitFloat(float, Unit):
         Returns:
             UnitFloat: New instance with value stored in SI units.
         """
-        si_val = float(value) * cls.SCALE_TO_SI
-        return float.__new__(cls, si_val)
+        si_val = cls.BASE_TYPE(value) * cls.SCALE_TO_SI
+        return cls.BASE_TYPE.__new__(cls, si_val)
 
     @classmethod
     def from_si(cls, si_value: float) -> UnitFloat:
@@ -411,6 +406,26 @@ class UnitFloat(float, Unit):
             str: Value in native scale with SI equivalent (e.g., "90 ° (= 1.5708 SI)").
         """
         return f"{self.to(type(self)):g} {type(self).SYMBOL} (= {float(self):g} SI)"
+
+class UnitFloat(float, Unit):
+    """Base class for type-safe unit calculations with automatic SI conversion.
+
+    This class stores values internally in SI units while allowing operations
+    only between compatible unit types (same 'root' family). It provides
+    automatic conversion between different units of the same physical quantity.
+
+    Attributes:
+        ROOT (ClassVar[type[UnitFloat]]): Root class defining the unit family.
+        SCALE_TO_SI (ClassVar[float]): Conversion factor to SI units.
+        SYMBOL (ClassVar[str]): Unit symbol for display purposes.
+        IS_FAMILY_ROOT (ClassVar[bool]): Indicates if this class is a root unit.
+    """
+
+    BASE_TYPE: ClassVar[BASE_TYPE] = float
+    SCALE_TO_SI: ClassVar[float] = 1.0
+    IS_FAMILY_ROOT: ClassVar[bool] = True
+
+    
 
 
 # ------------------------------------- Angle -------------------------------------

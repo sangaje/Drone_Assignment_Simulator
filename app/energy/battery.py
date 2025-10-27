@@ -84,11 +84,64 @@ class BatteryStatus:
         """Set the current battery charge level.
 
         Args:
-            wh (WattHour): New charge level in Watt-Hours.
+            wh (Energy): New charge level in energy units.
 
         Raises:
             ValueError: If the new charge level exceeds capacity or is negative.
         """
         if wh < ZERO_ENERGY:
-            raise ValueError
-        self._current.from_si(min(float(self._capacity), float(wh)))
+            raise ValueError("Battery charge cannot be negative")
+        if wh > self._capacity:
+            raise ValueError("Battery charge cannot exceed capacity")
+        self._current = wh
+
+    def consume_energy(self, energy: Energy) -> bool:
+        """Consume energy from the battery.
+
+        Args:
+            energy (Energy): Amount of energy to consume.
+
+        Returns:
+            bool: True if energy was successfully consumed, False if insufficient charge.
+        """
+        if energy < ZERO_ENERGY:
+            raise ValueError("Energy consumption cannot be negative")
+        
+        if self._current >= energy:
+            self._current = type(self._current).from_si(float(self._current) - float(energy))
+            return True
+        return False
+
+    def charge_battery(self, energy: Energy) -> Energy:
+        """Add energy to the battery.
+
+        Args:
+            energy (Energy): Amount of energy to add to the battery.
+
+        Returns:
+            Energy: Amount of energy actually added (may be less than requested if capacity reached).
+        """
+        if energy < ZERO_ENERGY:
+            raise ValueError("Charge energy cannot be negative")
+        
+        available_capacity = type(self._capacity).from_si(float(self._capacity) - float(self._current))
+        actual_charge = type(energy).from_si(min(float(energy), float(available_capacity)))
+        
+        self._current = type(self._current).from_si(float(self._current) + float(actual_charge))
+        return actual_charge
+
+    def is_empty(self) -> bool:
+        """Check if the battery is completely discharged.
+
+        Returns:
+            bool: True if battery charge is at or near zero.
+        """
+        return self._current <= ZERO_ENERGY
+
+    def is_full(self) -> bool:
+        """Check if the battery is fully charged.
+
+        Returns:
+            bool: True if battery charge equals capacity.
+        """
+        return self._current >= self._capacity
