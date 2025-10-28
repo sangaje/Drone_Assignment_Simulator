@@ -40,7 +40,7 @@ Example Usage:
     >>> # Timers are automatically cleaned up when done
 """
 
-from app.unit import Second, Time
+from dronesim.unit import Second, Time
 
 _ZERO_TIME = Second(0.0)
 
@@ -72,7 +72,7 @@ class Timer:
         4. Cleanup: Automatically removed from management systems
 
     Example:
-        >>> from app.unit import Second, Minute
+        >>> from dronesim.unit import Second, Minute
         >>> # Create 5-minute timer via vehicle
         >>> timer = vehicle.create_timer(Minute(5.0))
         >>> print(f"Initial duration: {timer.duration}")

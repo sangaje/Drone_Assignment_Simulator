@@ -17,8 +17,8 @@ Key Features:
     • Waypoint passage detection for discrete time stepping
 
 Typical Usage:
-    >>> from app.geo import GeoPoint, Latitude, Longitude
-    >>> from app.unit import Degree, Meter
+    >>> from dronesim.geo import GeoPoint, Latitude, Longitude
+    >>> from dronesim.unit import Degree, Meter
     >>>
     >>> # Create mission waypoints
     >>> home_base = GeoPoint.from_deg(37.5665, 126.9780)

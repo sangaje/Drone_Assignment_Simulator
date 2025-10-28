@@ -72,10 +72,10 @@ pip install -r requirements.txt
 
 ```python
 import simpy
-from app.vehicles import Drone
-from app.geo import GeoPoint
-from app.energy.battery import BatteryStatus
-from app.energy.unit import WattHour
+from dronesim.vehicles import Drone
+from dronesim.geo import GeoPoint
+from dronesim.energy.battery import BatteryStatus
+from dronesim.energy.unit import WattHour
 
 # Create simulation environment
 env = simpy.Environment()
@@ -104,7 +104,7 @@ The simulation uses a sophisticated three-phase update cycle:
 Comprehensive unit management with automatic SI conversion:
 
 ```python
-from app.unit import Kilometer, Degree, Hour
+from dronesim.unit import Kilometer, Degree, Hour
 
 distance = Kilometer(5.2)  # Automatically converts to meters internally
 heading = Degree(45)       # Converts to radians for calculations

@@ -33,8 +33,8 @@ Common Use Cases:
     • Performance measurement and timing analysis
 
 Example:
-    >>> from app.timer import Timer
-    >>> from app.unit import Second, Minute
+    >>> from dronesim.timer import Timer
+    >>> from dronesim.unit import Second, Minute
     >>>
     >>> # Timer creation through vehicle management (recommended)
     >>> delay_timer = vehicle.create_timer(Minute(5))

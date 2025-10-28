@@ -1,5 +1,5 @@
 [project]
-name = "drone_sim"
+name = "dronesim"
 version = "0.1.0"
 description = "Default template for PDM package"
 authors = [
@@ -25,7 +25,7 @@ dev = [
 # =============================================================================
 
 [tool.ruff]
-src = ["app", "tests"]    # Specify the source directory for the project
+src = ["dronesim", "tests"]    # Specify the source directory for the project
 target-version = "py312"  # Specify the target Python version for linting
 line-length = 100         # Set the maximum line length for code style
 indent-width = 4          # Indentation width for code style
@@ -53,6 +53,7 @@ select = [
 ignore = [
   "D203", # one-blank-line-before-class - conflicts with Google style docstrings
   "D213", # multi-line-docstring-summary - conflicts with Google style docstrings
+  "ARG002", # unused-method-argument - allow unused method arguments (common in abstract methods and overrides)
 ]
 
 per-file-ignores = { "__init__.py" = [
@@ -102,9 +103,19 @@ distribution = false
 help = "ec"
 lint = "pdm run ruff check --fix ."
 fmt-code = "pdm run ruff format ."
-fmt-docstrings = "pdm run docformatter --in-place --wrap-summaries 100 --wrap-descriptions 100 --recursive ."
+fmt-docstrings = "pdm run docformatter --in-place --recursive ."
 type-check = "pdm run mypy ."
 test = "pdm run pytest"
+
+# =============================================================================
+# DOCFORMATTER CONFIGURATION - Settings for docstring formatting
+# =============================================================================
+
+[tool.docformatter]
+wrap-summaries = 100
+wrap-descriptions = 100
+make-summary-multi-line = true
+close-quotes-on-newline = true
 
 [tool.pdm.build]
 includes = ["app"]

@@ -22,15 +22,18 @@ Configuration:
     _next: Dictionary defining the normal progression sequence
 """
 
-from enum import Enum, auto
+from __future__ import annotations
 
-from app.geo import GeoPoint
-from app.state import Action, StateMachine
+from enum import IntEnum, auto
+
+from dronesim.geo import GeoPoint
+from dronesim.state import Action, StateMachine
+from dronesim.unit import Time
 
 from .task import Task
 
 
-class DeliveryState(Enum):
+class DeliveryState(IntEnum):
     """Enumeration of states for delivery task progression.
 
     This enum defines all possible states that a delivery task can be in
@@ -56,33 +59,6 @@ class DeliveryState(Enum):
     ABORTED = auto()
 
 
-# State transition rules: defines which state transitions are allowed
-# Each state can progress to its normal next state or be aborted
-# Terminal states (DONE, ABORTED) have no allowed transitions
-_allowed = {
-    DeliveryState.ASSIGNED: [Action(DeliveryState.GO_PICKUP), Action(DeliveryState.ABORTED)],
-    DeliveryState.GO_PICKUP: [Action(DeliveryState.SERVICE_PICKUP), Action(DeliveryState.ABORTED)],
-    DeliveryState.SERVICE_PICKUP: [Action(DeliveryState.GO_DROPOFF), Action(DeliveryState.ABORTED)],
-    DeliveryState.GO_DROPOFF: [
-        Action(DeliveryState.SERVICE_DROPOFF),
-        Action(DeliveryState.ABORTED),
-    ],
-    DeliveryState.SERVICE_DROPOFF: [Action(DeliveryState.DONE), Action(DeliveryState.ABORTED)],
-    DeliveryState.DONE: [],
-    DeliveryState.ABORTED: [],
-}
-
-# Normal state progression sequence for successful delivery completion
-# Maps each state to its logical next state in the delivery process
-_next = {
-    DeliveryState.ASSIGNED: DeliveryState.GO_PICKUP,
-    DeliveryState.GO_PICKUP: DeliveryState.SERVICE_PICKUP,
-    DeliveryState.SERVICE_PICKUP: DeliveryState.GO_DROPOFF,
-    DeliveryState.GO_DROPOFF: DeliveryState.SERVICE_DROPOFF,
-    DeliveryState.SERVICE_DROPOFF: DeliveryState.DONE,
-}
-
-
 class DeliveryTask(Task):
     """Concrete implementation of a package delivery task.
 
@@ -96,7 +72,10 @@ class DeliveryTask(Task):
     and error conditions through the abort mechanism.
 
     Attributes:
-        state (DeliveryState): Current state of the delivery task.
+        _event_time (dict[DeliveryState, Time | None]): Timestamps for each state entry.
+        state_machine (StateMachine | None): State machine instance for transitions.
+
+    Inherited Attributes:
         origin (GeoPoint): Pickup location for the package.
         destination (GeoPoint): Delivery destination for the package.
         id (int): Unique identifier for this task instance.
@@ -115,6 +94,46 @@ class DeliveryTask(Task):
         >>> print(delivery.current)  # DeliveryState.GO_PICKUP
     """
 
+    # State transition rules: defines which state transitions are allowed
+    # Each state can progress to its normal next state or be aborted
+    # Terminal states (DONE, ABORTED) have no allowed transitions
+    _allowed = {
+        DeliveryState.ASSIGNED: [
+            Action(DeliveryState.GO_PICKUP),
+            Action(DeliveryState.ABORTED),
+        ],
+        DeliveryState.GO_PICKUP: [
+            Action(DeliveryState.SERVICE_PICKUP),
+            Action(DeliveryState.ABORTED),
+        ],
+        DeliveryState.SERVICE_PICKUP: [
+            Action(DeliveryState.GO_DROPOFF),
+            Action(DeliveryState.ABORTED),
+        ],
+        DeliveryState.GO_DROPOFF: [
+            Action(DeliveryState.SERVICE_DROPOFF),
+            Action(DeliveryState.ABORTED),
+        ],
+        DeliveryState.SERVICE_DROPOFF: [
+            Action(DeliveryState.DONE),
+            Action(DeliveryState.ABORTED),
+        ],
+        DeliveryState.DONE: [],
+        DeliveryState.ABORTED: [],
+    }
+
+    # Normal state progression sequence for successful delivery completion
+    # Maps each state to its logical next state in the delivery process
+    _next = {
+        DeliveryState.ASSIGNED: DeliveryState.GO_PICKUP,
+        DeliveryState.GO_PICKUP: DeliveryState.SERVICE_PICKUP,
+        DeliveryState.SERVICE_PICKUP: DeliveryState.GO_DROPOFF,
+        DeliveryState.GO_DROPOFF: DeliveryState.SERVICE_DROPOFF,
+        DeliveryState.SERVICE_DROPOFF: DeliveryState.DONE,
+    }
+
+    _event_time: dict[DeliveryState, Time | None]
+
     state_machine: StateMachine | None
 
     def __init__(self, origin: GeoPoint, destination: GeoPoint):
@@ -129,14 +148,37 @@ class DeliveryTask(Task):
             destination (GeoPoint): Geographic location for package delivery.
         """
         super().__init__(origin, destination)
-        self.init_state_machine(DeliveryState.ASSIGNED, _allowed)
+        self.init_state_machine(DeliveryState.ASSIGNED, self._allowed)
+        self._event_time = {
+            DeliveryState.ASSIGNED: None,
+            DeliveryState.GO_PICKUP: None,
+            DeliveryState.SERVICE_PICKUP: None,
+            DeliveryState.GO_DROPOFF: None,
+            DeliveryState.SERVICE_DROPOFF: None,
+            DeliveryState.DONE: None,
+            DeliveryState.ABORTED: None,
+        }
 
-    def next(self) -> DeliveryState:
+    @property
+    def event_time(self) -> dict[DeliveryState, Time | None]:
+        """Get the event timestamps for each delivery state.
+
+        Returns:
+            dict[DeliveryState, Time | None]: Mapping of each delivery state
+            to the Time it was entered, or None if not yet reached.
+        """
+        return self._event_time
+
+    def next(self, now: Time | None = None) -> DeliveryState:
         """Progress the task to the next state in the delivery sequence.
 
         Advances the task through its normal state progression according to
         the predefined sequence in _next dictionary. Validates the transition
         is allowed before updating the state.
+
+        Args:
+            now (Time | None): Current simulation time to record state entry timestamp.
+                              If provided, records the timestamp for the current state.
 
         Returns:
             DeliveryState: The new current state after progression.
@@ -150,7 +192,9 @@ class DeliveryTask(Task):
             >>> delivery.next()  # ASSIGNED → GO_PICKUP
             >>> delivery.next()  # GO_PICKUP → SERVICE_PICKUP
         """
-        self.transition_to(_next[self.current_state])
+        if now:
+            self._event_time[self.current_state] = now
+        self.transition_to(self._next[self.current_state])
         return self.current_state
 
     def abort(self):
@@ -170,3 +214,15 @@ class DeliveryTask(Task):
             >>> print(delivery.current)  # DeliveryState.ABORTED
         """
         self.transition_to(DeliveryState.ABORTED)
+
+    @staticmethod
+    def ground_task() -> set[DeliveryState]:
+        """Get the set of delivery states that require ground operations.
+
+        Returns the delivery states during which the drone must be on the ground
+        to perform package pickup or dropoff operations.
+
+        Returns:
+            set[DeliveryState]: Set containing SERVICE_PICKUP and SERVICE_DROPOFF states.
+        """
+        return {DeliveryState.SERVICE_PICKUP, DeliveryState.SERVICE_DROPOFF}

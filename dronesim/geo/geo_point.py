@@ -10,7 +10,7 @@ the WGS84 ellipsoid.
 
 from dataclasses import dataclass
 
-from app.unit import Angle, Degree, Length, Meter, Radian
+from dronesim.unit import Angle, Degree, Length, Meter, Radian
 from pyproj import Geod
 
 # WGS84 geodesic calculator for accurate Earth surface calculations

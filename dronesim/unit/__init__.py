@@ -36,7 +36,7 @@ Common Use Cases:
     - Mission parameters and constraints
 
 Example:
-    >>> from app.unit import Meter, Kilometer, Degree, Second
+    >>> from dronesim.unit import Meter, Kilometer, Degree, Second
     >>>
     >>> # Create units with automatic SI conversion
     >>> altitude = Meter(150)  # 150 meters AGL
@@ -77,9 +77,9 @@ Available Units:
 """
 
 # Import all unit definitions
-from .unit_angle import Degree, Radian
+from .unit_angle import Angle, Degree, Radian
 from .unit_base import Unit
-from .unit_distance import Kilometer, Meter
+from .unit_distance import Kilometer, Length, Meter
 from .unit_float import UnitFloat
 from .unit_power import Kilowatt, Power, Watt
 from .unit_time import Hour, Minute, Second, Time
@@ -99,9 +99,11 @@ __all__ = [
     # Angular units
     "Radian",
     "Degree",
+    "Angle",
     # Distance units
     "Meter",
     "Kilometer",
+    "Length",
     # Time units
     "Second",
     "Minute",

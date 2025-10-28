@@ -1,72 +1,90 @@
-"""Autonomous drone vehicle implementation with state machine framework.
+"""Generic autonomous drone implementation with comprehensive state machine framework.
 
-This module implements the Drone class, a concrete vehicle type that extends
-the abstract Vehicle base class with comprehensive state machine integration.
-It provides drone-specific functionality including battery-powered flight operations,
-state-based behavior management, and customizable operational logic through
-overrideable methods.
+This module provides the Drone[T] class, a generic concrete vehicle implementation that extends
+the abstract Vehicle base class with drone-specific flight operations, battery management,
+and state-based behavior control. The class serves as the foundation for specialized drone
+types through generic type parameters and extensive customization capabilities.
 
-The Drone class represents quadcopter-style autonomous vehicles with a finite
-state machine controlling flight phases (GROUNDED, TAKING_OFF, NAVIGATING, LANDING, EMERGENCY).
-Each state has associated behavior methods that can be overridden by subclasses
-for specialized drone implementations.
+Architecture Overview:
+    Generic Type System:
+        • Drone[T] where T extends Task for type-safe task assignment
+        • Enables specialized implementations like Drone[DeliveryTask]
+        • Compile-time type checking prevents task assignment errors
 
-Key Features:
-    • State machine-driven flight operations (DroneState enum)
-    • Overrideable state behavior methods (on_*, enter_* patterns)
-    • Battery-powered operations with multi-phase power consumption
-    • Geographic positioning with WGS84 coordinate system
-    • Generic task management with type safety
-    • Base station coordination and operational thresholds
-    • Customizable update logic for specialized drone types
+    State Machine Framework:
+        • DroneState enum: GROUNDED, TAKING_OFF, NAVIGATING, LANDING, EMERGENCY
+        • Validated state transitions with configurable actions and effects
+        • Overrideable state behavior methods (on_*, enter_* patterns)
 
-Extensibility:
-    The Drone class is designed for extension through method overriding:
-    • vehicle_update(dt): Main update loop - override for custom behavior
-    • on_*() methods: State behavior handlers - override for state-specific logic
-    • enter_*() methods: State entry actions - override for transition logic
+    Power Management System:
+        • PowerConsumption dataclass with idle, vtol, and transit profiles
+        • BatteryStatus integration with energy consumption modeling
+        • Operational thresholds and safety constraints
 
-    This pattern allows specialized drone types (delivery, surveillance, etc.)
-    to customize behavior while maintaining the core state machine framework.
+    Task Management:
+        • Generic task queue system with type safety
+        • Current task list and destination management
+        • Base station coordination and return-to-base logic
 
-State Machine Integration:
-    Uses the app.state.StateMachine framework for validated state transitions
-    with configurable actions and effects. State transitions are enforced
-    through the transition validation system.
+Core Components:
+    DroneState Enumeration:
+        • GROUNDED: Drone on surface, ready for task assignment
+        • TAKING_OFF: Vertical takeoff phase with high power consumption
+        • NAVIGATING: Horizontal flight to destination with efficient power usage
+        • LANDING: Vertical landing phase with controlled descent
+        • EMERGENCY: Emergency state for critical situations and failures
 
-Example Usage:
-    >>> from app.geo import GeoPoint
-    >>> from app.energy.battery import BatteryStatus
-    >>> from app.energy.unit import WattHour
-    >>> from app.unit import KilometersPerHour, Watt
-    >>>
-    >>> # Create drone with custom power profile
-    >>> drone = Drone(
-    ...     pos=GeoPoint.from_deg(37.5665, 126.9780),
-    ...     battery=BatteryStatus(WattHour(1000), WattHour(800)),
-    ...     velocity=KilometersPerHour(60.0),
-    ...     power_idle=Watt(50.0),
-    ...     power_vtol=Watt(500.0),
-    ...     power_transit=Watt(200.0),
-    ... )
-    >>>
-    >>> # Override for specialized behavior
-    >>> class DeliveryDrone(Drone[DeliveryTask]):
-    ...     def on_navigating(self, dt: Time):
-    ...         super().on_navigating(dt)  # Call base behavior
-    ...         self.update_delivery_status()  # Add custom logic
+    PowerConsumption Profile:
+        • idle: Power during hovering and stationary operations
+        • vtol: Power during vertical takeoff and landing maneuvers
+        • transit: Power during efficient horizontal flight operations
+
+    Task Integration:
+        • Generic task assignment with type constraints
+        • Task queue management with priority handling
+        • Current mission tracking and progress monitoring
+
+Extensibility Patterns:
+    Method Override System:
+        • vehicle_update(dt, now): Core update loop customization
+        • on_[state](dt, now): State-specific behavior handlers
+        • enter_[state](now): State transition entry actions
+        • Custom power profiles and operational parameters
+
+    Specialized Implementations:
+        >>> class DeliveryDrone(Drone[DeliveryTask]):
+        ...     def vehicle_update(self, dt: Time, now: Time):
+        ...         super().vehicle_update(dt, now)
+        ...         self._update_delivery_progress(dt)
+        ...
+        ...     def on_navigating(self, dt: Time, now: Time):
+        ...         super().on_navigating(dt, now)
+        ...         self._optimize_delivery_route()
+
+Integration Requirements:
+    • ..energy: Battery management and power consumption
+    • ..geo: WGS84 geographic positioning and navigation
+    • ..mission: Generic task system and mission management
+    • ..state: State machine framework and validation
+    • ..unit: Type-safe measurements and conversions
+
+Performance Characteristics:
+    • Optimized for real-time simulation with hundreds of concurrent drones
+    • Memory-efficient task queue and timer management
+    • Configurable update granularity for accuracy vs performance trade-offs
+    • Scalable architecture supporting heterogeneous drone fleets
 """
 
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from app.energy import BatteryStatus
-from app.geo import GeoPoint
-from app.mission import Task
-from app.state import Action, ActionFn
-from app.timer import Timer
-from app.unit import KilometersPerHour, Meter, Minute, Power, Time, Velocity, Watt
+from dronesim.energy import BatteryStatus
+from dronesim.geo import GeoPoint
+from dronesim.mission import Task
+from dronesim.state import Action, ActionFn
+from dronesim.timer import Timer
+from dronesim.unit import KilometersPerHour, Meter, Minute, Power, Time, Velocity, Watt
 
 from .vehicle import Vehicle
 
@@ -77,6 +95,33 @@ DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = 20.0  # Minimum battery percentage to b
 
 
 class DroneState(Enum):
+    """Enumeration of possible drone operational states.
+
+    Defines the discrete states that a drone can be in during its operational
+    lifecycle. Each state represents a distinct phase of drone operation with
+    specific behaviors, power consumption profiles, and valid transitions.
+
+    States:
+        GROUNDED: Drone is on the ground, ready for task assignment or landed.
+                 Lowest power consumption, can accept new missions.
+
+        TAKING_OFF: Drone is performing vertical takeoff maneuver.
+                   High power consumption due to motor load against gravity.
+
+        NAVIGATING: Drone is in horizontal flight toward destination.
+                   Optimized power consumption for efficient transportation.
+
+        LANDING: Drone is performing controlled vertical descent and landing.
+                High power consumption for precise positioning control.
+
+        EMERGENCY: Critical failure state requiring immediate attention.
+                  Used for error handling and safety procedures.
+
+    State Transitions:
+        Normal flow: GROUNDED → TAKING_OFF → NAVIGATING → LANDING → GROUNDED
+        Emergency: Any state → EMERGENCY (for critical failures)
+    """
+
     GROUNDED = auto()
     TAKING_OFF = auto()
     NAVIGATING = auto()
@@ -165,46 +210,47 @@ class Drone[T: Task](Vehicle):
           Override to implement specialized drone behavior and logic
 
         State Behavior Methods (called continuously while in state):
-        • on_grounded(dt): Override for ground operations (charging, maintenance)
-        • on_taking_off(dt): Override for takeoff procedures and checks
-        • on_navigating(dt): Override for flight behavior and task execution
-        • on_landing(dt): Override for landing procedures and positioning
-        • on_emergency(dt): Override for emergency response protocols
+        • on_grounded(dt, now): Override for ground operations (charging, maintenance)
+        • on_taking_off(dt, now): Override for takeoff procedures and checks
+        • on_navigating(dt, now): Override for flight behavior and task execution
+        • on_landing(dt, now): Override for landing procedures and positioning
+        • on_emergency(dt, now): Override for emergency response protocols
 
         State Entry Methods (called once when entering state):
-        • enter_grounded(dt): Override for ground state initialization
-        • enter_taking_off(dt): Override for takeoff state setup
-        • enter_navigating(dt): Override for navigation state initialization
-        • enter_landing(dt): Override for landing state setup
-        • enter_emergency(dt): Override for emergency state activation
+        • enter_grounded(now): Override for ground state initialization
+        • enter_taking_off(now): Override for takeoff state setup
+        • enter_navigating(now): Override for navigation state initialization
+        • enter_landing(now): Override for landing state setup
+        • enter_emergency(now): Override for emergency state activation
 
     Type Parameters:
         T: Task type this drone handles, must extend Task base class.
            Enables type-safe task assignment and specialized behaviors.
 
-    Key Attributes:
-        battery: Current battery status and capacity information
-        operational_battery_percentage: Minimum battery threshold for operations
-        velocity: Cruising speed for horizontal movement
-        transition_duration: Time for state transitions (takeoff/landing)
-        power_idle/vtol/transit: Power consumption for different operational phases
-        base_pos: Dictionary of base station positions
-
-    Private Attributes:
-        _task_current: Currently executing tasks of type T
-        _task_queue: Queue of pending tasks for execution
-        _current_destination: Target position for movement
-        _battery_usage: Current power consumption rate
-        _vlot_timer: Timer for vertical operations (takeoff/landing)
+    Attributes:
+        battery (BatteryStatus): Current battery status and capacity information
+        operational_battery_percentage (float): Minimum battery threshold for operations
+        base_pos (dict[GeoPoint]): Dictionary of base station positions by ID
+        velocity (Velocity): Cruising speed for horizontal movement
+        transition_duration (Time): Time required for state transitions
+        power_idle (Power): Power consumption during idle/hovering operations
+        power_vtol (Power): Power consumption during takeoff/landing operations
+        power_transit (Power): Power consumption during horizontal flight
+        _tasks_current (list[T] | None): Currently executing tasks of type T
+        _task_queue (deque[T]): Queue of pending tasks for execution
+        _current_destination (GeoPoint | None): Target position for movement
+        _on_actions (dict[DroneState, ActionFn]): State behavior method mapping
+        _battery_usage (Power): Current power consumption rate
+        _vlot_timer (Timer | None): Timer for vertical operations (takeoff/landing)
 
     Usage Pattern:
         class SpecializedDrone(Drone[MyTaskType]):
-            def vehicle_update(self, dt: Time):
-                super().vehicle_update(dt)  # Call base behavior
-                self.my_custom_logic()      # Add specialized logic
+            def vehicle_update(self, dt: Time, now: Time):
+                super().vehicle_update(dt, now)  # Call base behavior
+                self.my_custom_logic()           # Add specialized logic
 
-            def on_navigating(self, dt: Time):
-                super().on_navigating(dt)   # Base navigation behavior
+            def on_navigating(self, dt: Time, now: Time):
+                super().on_navigating(dt, now)   # Base navigation behavior
                 self.execute_specialized_navigation()  # Custom navigation
     """
 
@@ -277,10 +323,9 @@ class Drone[T: Task](Vehicle):
         super().__init__(pos)
         self.battery = battery
 
-        with operational_battery_percentage as percent:
-            if percent < 0.0 or percent > 100.0:
-                msg = f"Invalid operational battery percentage: {percent}"
-                raise ValueError(msg)
+        if operational_battery_percentage < 0.0 or operational_battery_percentage > 100.0:
+            msg = f"Invalid operational battery percentage: {operational_battery_percentage}"
+            raise ValueError(msg)
 
         self.operational_battery_percentage = operational_battery_percentage
 
@@ -350,7 +395,7 @@ class Drone[T: Task](Vehicle):
         self._current_destination = destination
 
     @property
-    def current_tasks(self) -> T | None:
+    def current_tasks(self) -> list[T] | None:
         """Get the current task assigned to the drone.
 
         Returns:
@@ -376,7 +421,10 @@ class Drone[T: Task](Vehicle):
         """
         return self._task_queue
 
-    def go_to_destination(self, dt: Time) -> bool:
+    def _start_flight(self, now: Time) -> None:
+        self.transition_to(DroneState.TAKING_OFF, now)
+
+    def _go_to_destination(self, dt: Time) -> bool:
         """Move the drone towards its current destination and check for arrival.
 
         Calculates the heading to the current destination and moves the drone
@@ -473,7 +521,7 @@ class Drone[T: Task](Vehicle):
         self._task_queue.append(task)
         return True
 
-    def vehicle_update(self, dt):
+    def vehicle_update(self, dt, now: Time) -> None:
         """Execute drone-specific update logic for one simulation step.
 
         This method is called each simulation timestep and handles core drone
@@ -488,18 +536,19 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration in simulation time units.
+            now (Time): Current simulation time.
 
         Example Override:
-            def vehicle_update(self, dt):
-                super().vehicle_update(dt)  # Call base state machine logic
-                self.update_sensor_data()   # Custom functionality
-                self.check_mission_status() # Specialized behavior
+            def vehicle_update(self, dt, now):
+                super().vehicle_update(dt, now)  # Call base state machine logic
+                self.update_sensor_data()        # Custom functionality
+                self.check_mission_status()      # Specialized behavior
         """
         current_state = self.current_state
         if current_state in self._on_actions:
-            self._on_actions[current_state](dt)
+            self._on_actions[current_state](dt, now)
 
-    def on_grounded(self, dt: Time) -> None:
+    def on_grounded(self, dt: Time, now: Time) -> None:
         """Handle drone behavior while in the GROUNDED state.
 
         Called continuously while the drone remains on the ground. The base
@@ -514,16 +563,17 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def on_grounded(self, dt: Time):
-                super().on_grounded(dt)     # Call base behavior
-                self.charge_battery(dt)     # Custom charging logic
-                self.perform_diagnostics()  # Specialized checks
+            def on_grounded(self, dt: Time, now: Time):
+                super().on_grounded(dt, now)    # Call base behavior
+                self.charge_battery(dt)         # Custom charging logic
+                self.perform_diagnostics()      # Specialized checks
         """
         pass
 
-    def enter_grounded(self, dt: Time) -> None:
+    def enter_grounded(self, now: Time) -> None:
         """Handle state entry actions when transitioning to GROUNDED state.
 
         Called once when the drone enters the GROUNDED state. The base
@@ -537,18 +587,18 @@ class Drone[T: Task](Vehicle):
         - Ground control registration
 
         Args:
-            dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def enter_grounded(self, dt: Time):
-                super().enter_grounded(dt)      # Set idle power consumption
+            def enter_grounded(self, now: Time):
+                super().enter_grounded(now)     # Set idle power consumption
                 self.log_landing_complete()     # Custom logging
                 self.register_with_ground()     # Ground control integration
                 self.report_mission_status()    # Mission completion reporting
         """
         self._battery_usage = self.power_idle
 
-    def on_taking_off(self, dt: Time) -> None:
+    def on_taking_off(self, dt: Time, now: Time) -> None:
         """Handle drone behavior while in the TAKING_OFF state.
 
         Called continuously during vertical takeoff operations. The base
@@ -564,18 +614,19 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def on_taking_off(self, dt: Time):
-                super().on_taking_off(dt)   # Handle base timing logic
-                self.monitor_altitude()     # Custom altitude tracking
-                self.stabilize_payload()    # Specialized payload handling
+            def on_taking_off(self, dt: Time, now: Time):
+                super().on_taking_off(dt, now)  # Handle base timing logic
+                self.monitor_altitude()         # Custom altitude tracking
+                self.stabilize_payload()        # Specialized payload handling
         """
         if self._vlot_timer and self._vlot_timer.done:
-            self.transition_to(DroneState.NAVIGATING)
+            self.transition_to(DroneState.NAVIGATING, now)
             self._vlot_timer = None
 
-    def enter_taking_off(self, dt: Time) -> None:
+    def enter_taking_off(self, now: Time) -> None:
         """Handle state entry actions when transitioning to TAKING_OFF state.
 
         Called once when the drone enters the TAKING_OFF state. The base
@@ -589,11 +640,11 @@ class Drone[T: Task](Vehicle):
         - Communication protocol setup
 
         Args:
-            dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def enter_taking_off(self, dt: Time):
-                super().enter_taking_off(dt)    # Set VTOL power and timer
+            def enter_taking_off(self, now: Time):
+                super().enter_taking_off(now)   # Set VTOL power and timer
                 self.log_takeoff_initiated()    # Custom logging
                 self.validate_flight_systems()  # Pre-flight checks
                 self.activate_navigation()      # Navigation system startup
@@ -601,7 +652,7 @@ class Drone[T: Task](Vehicle):
         self._battery_usage = self.power_vtol + self.power_idle
         self._vlot_timer = self.create_timer(self.transition_duration)
 
-    def on_navigating(self, dt: Time) -> None:
+    def on_navigating(self, dt: Time, now: Time) -> None:
         """Handle drone behavior while in the NAVIGATING state.
 
         Called continuously during horizontal flight operations. The base
@@ -618,18 +669,19 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def on_navigating(self, dt: Time):
-                super().on_navigating(dt)   # Handle base movement
-                self.execute_tasks()        # Process active tasks
-                self.avoid_obstacles()      # Custom obstacle avoidance
-                self.update_formation()     # Coordinate with other drones
+            def on_navigating(self, dt: Time, now: Time):
+                super().on_navigating(dt, now)  # Handle base movement
+                self.execute_tasks()            # Process active tasks
+                self.avoid_obstacles()          # Custom obstacle avoidance
+                self.update_formation()         # Coordinate with other drones
         """
-        if self.go_to_destination(dt):
-            self.transition_to(DroneState.LANDING)
+        if self._go_to_destination(dt):
+            self.transition_to(DroneState.LANDING, now)
 
-    def enter_navigating(self, dt: Time) -> None:
+    def enter_navigating(self, now: Time) -> None:
         """Handle state entry actions when transitioning to NAVIGATING state.
 
         Called once when the drone enters the NAVIGATING state. The base
@@ -643,18 +695,18 @@ class Drone[T: Task](Vehicle):
         - Communication frequency setup
 
         Args:
-            dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def enter_navigating(self, dt: Time):
-                super().enter_navigating(dt)    # Set transit power consumption
+            def enter_navigating(self, now: Time):
+                super().enter_navigating(now)   # Set transit power consumption
                 self.log_navigation_started()   # Custom logging
                 self.calculate_optimal_path()   # Route optimization
                 self.initialize_tasks()         # Task system preparation
         """
         self._battery_usage = self.power_transit + self.power_idle
 
-    def on_landing(self, dt: Time) -> None:
+    def on_landing(self, dt: Time, now: Time) -> None:
         """Handle drone behavior while in the LANDING state.
 
         Called continuously during vertical landing operations. The base
@@ -671,19 +723,20 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def on_landing(self, dt: Time):
-                super().on_landing(dt)      # Handle base timing logic
-                self.verify_landing_zone()  # Custom safety checks
-                self.deploy_payload()       # Specialized payload handling
-                self.prepare_shutdown()     # Post-landing procedures
+            def on_landing(self, dt: Time, now: Time):
+                super().on_landing(dt, now)     # Handle base timing logic
+                self.verify_landing_zone()      # Custom safety checks
+                self.deploy_payload()           # Specialized payload handling
+                self.prepare_shutdown()         # Post-landing procedures
         """
         if self._vlot_timer and self._vlot_timer.done:
-            self.transition_to(DroneState.GROUNDED)
+            self.transition_to(DroneState.GROUNDED, now)
             self._vlot_timer = None
 
-    def enter_landing(self, dt: Time) -> None:
+    def enter_landing(self, now: Time) -> None:
         """Handle state entry actions when transitioning to LANDING state.
 
         Called once when the drone enters the LANDING state. The base
@@ -697,18 +750,18 @@ class Drone[T: Task](Vehicle):
         - Ground communication establishment
 
         Args:
-            dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def enter_landing(self, dt: Time):
-                super().enter_landing(dt)       # Start landing timer
+            def enter_landing(self, now: Time):
+                super().enter_landing(now)      # Start landing timer
                 self.log_landing_initiated()    # Custom logging
                 self.analyze_landing_zone()     # Landing site verification
                 self.configure_descent_rate()   # Descent parameter setup
         """
         self._vlot_timer = self.create_timer(self.transition_duration)
 
-    def on_emergency(self, dt: Time) -> None:
+    def on_emergency(self, dt: Time, now: Time) -> None:
         """Handle drone behavior while in the EMERGENCY state.
 
         Called continuously during emergency situations. The base implementation
@@ -724,17 +777,18 @@ class Drone[T: Task](Vehicle):
 
         Args:
             dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def on_emergency(self, dt: Time):
-                super().on_emergency(dt)        # Base emergency framework
-                self.transmit_distress()        # Custom emergency communication
-                self.execute_emergency_landing() # Specialized landing protocol
-                self.activate_beacon()          # Emergency location beacon
+            def on_emergency(self, dt: Time, now: Time):
+                super().on_emergency(dt, now)       # Base emergency framework
+                self.transmit_distress()            # Custom emergency communication
+                self.execute_emergency_landing()    # Specialized landing protocol
+                self.activate_beacon()              # Emergency location beacon
         """
         pass
 
-    def enter_emergency(self, dt: Time) -> None:
+    def enter_emergency(self, now: Time) -> None:
         """Handle state entry actions when transitioning to EMERGENCY state.
 
         Called once when the drone enters the EMERGENCY state. The base
@@ -749,11 +803,11 @@ class Drone[T: Task](Vehicle):
         - Emergency communication setup
 
         Args:
-            dt (Time): Time step duration for simulation update.
+            now (Time): Current simulation time.
 
         Example Override:
-            def enter_emergency(self, dt: Time):
-                super().enter_emergency(dt)         # Base emergency setup
+            def enter_emergency(self, now: Time):
+                super().enter_emergency(now)        # Base emergency setup
                 self.log_emergency_declared()       # Emergency logging
                 self.transmit_mayday()              # Distress signal
                 self.activate_emergency_beacon()    # Location beacon

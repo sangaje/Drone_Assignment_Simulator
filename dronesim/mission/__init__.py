@@ -10,7 +10,7 @@ tasks. Each task maintains its own state machine and lifecycle management.
 
 Components:
     Task: Abstract base class for all mission tasks
-    TaskDelivery: Concrete delivery mission implementation
+    DeliveryTask: Concrete delivery mission implementation
     DeliveryState: State enumeration for delivery task progression
 
 Key Features:
@@ -33,18 +33,18 @@ Common Use Cases:
     • Agricultural monitoring and data collection
 
 Example:
-    >>> from app.mission import TaskDelivery, DeliveryState
-    >>> from app.geo import GeoPoint
+    >>> from dronesim.mission import DeliveryTask, DeliveryState
+    >>> from dronesim.geo import GeoPoint
     >>>
     >>> # Create delivery mission
     >>> pickup = GeoPoint.from_deg(37.5665, 126.9780)  # Seoul
     >>> dropoff = GeoPoint.from_deg(37.5675, 126.9890)  # Destination
-    >>> delivery = TaskDelivery(pickup, dropoff)
+    >>> delivery = DeliveryTask(pickup, dropoff)
     >>>
     >>> # Progress through states
-    >>> print(f"Initial state: {delivery.current}")  # ASSIGNED
+    >>> print(f"Initial state: {delivery.current_state}")  # ASSIGNED
     >>> delivery.next()  # Transition to GO_PICKUP
-    >>> print(f"Next state: {delivery.current}")  # GO_PICKUP
+    >>> print(f"Next state: {delivery.current_state}")  # GO_PICKUP
 """
 
 from .task import Task

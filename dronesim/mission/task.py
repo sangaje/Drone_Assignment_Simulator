@@ -49,8 +49,8 @@ Example:
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.geo import GeoPoint
-from app.state import State, StateGraph, StateMachine
+from dronesim.geo import GeoPoint
+from dronesim.state import State, StateGraph, StateMachine
 
 
 class Task(ABC):
@@ -67,11 +67,11 @@ class Task(ABC):
     while deferring task-specific behaviors to abstract methods.
 
     Attributes:
-        id: Unique identifier generated from the object's memory address.
-        origin: Starting geographic location for the task.
-        destination: Target geographic location for the task.
-        state_machine: ClassVar containing the StateMachine instance for state management.
-                      MUST be initialized by subclasses with appropriate state graph.
+        id (int): Unique identifier generated from the object's memory address.
+        origin (GeoPoint): Starting geographic location for the task.
+        destination (GeoPoint): Target geographic location for the task.
+        _state_machine (StateMachine | None): Internal state machine instance for managing
+                                            task state transitions and validation.
 
     Abstract Methods:
         abort(): Task-specific abort implementation for cleanup and state transition.
@@ -81,7 +81,7 @@ class Task(ABC):
 
         state_machine: ClassVar[StateMachine] = StateMachine(
             initial_state=YourTaskState.INITIAL,
-            nodes_graph={...}  # Your state transition rules
+            nodes_graph={dronesim..}  # Your state transition rules
         )
 
     Example:
@@ -139,6 +139,25 @@ class Task(ABC):
         pass
 
     def transition_to(self, next_state: State, *args, **kwargs) -> Any:
+        """Request a state transition to the specified state.
+
+        Attempts to transition the task's state machine to the target state,
+        validating that the transition is allowed according to the configured
+        state graph. Executes any associated action effects during the transition.
+
+        Args:
+            next_state (State): The target state to transition to.
+            *args: Additional arguments passed to transition action effects.
+            **kwargs: Additional keyword arguments passed to action effects.
+
+        Returns:
+            Any: The result of executing the transition action's effect function,
+                or None if the action has no effect.
+
+        Raises:
+            NotImplementedError: If the state machine has not been initialized.
+            ValueError: If the transition is not allowed by the state machine rules.
+        """
         if not type(self)._state_machine:
             msg = "Subclasses must initialize the state_machine ClassVar."
             raise NotImplementedError(msg)

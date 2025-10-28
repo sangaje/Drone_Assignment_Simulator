@@ -1,53 +1,77 @@
-"""Advanced vehicle simulation framework for autonomous systems.
+"""Advanced vehicle simulation framework with state machine integration.
 
-This module provides the foundational Vehicle abstract base class that defines
-the comprehensive interface and behaviors for all autonomous vehicles in the
-simulation environment. It establishes a robust, extensible framework for
-implementing diverse vehicle types with consistent simulation integration,
-mission management, and operational capabilities.
+This module provides the foundational Vehicle abstract base class that serves as the
+comprehensive base for all autonomous vehicles in discrete event simulation environments.
+The class integrates state machine capabilities, timer management, and task assignment
+patterns to create a robust framework for implementing diverse vehicle types.
 
-The Vehicle ABC enforces a standardized three-phase execution model while
-providing essential infrastructure for positioning, task management, and
-lifecycle control within discrete event simulation environments. The design
-emphasizes modularity, performance, and realistic operational modeling.
+The Vehicle ABC implements a structured execution model with state machine integration,
+providing essential infrastructure for positioning, state-based behavior management,
+and mission execution within scalable simulation environments.
 
-Execution Model:
-    The Vehicle class implements a structured three-phase update cycle:
-    1. Primary Update (update): Core vehicle behaviors and operations
-    2. External Processing: Task assignments and inter-vehicle interactions
-    3. Post-Processing (post_update): Cleanup, validation, and preparation
+Core Architecture:
+    State Machine Integration:
+        • Built-in StateMachine support for validated state transitions
+        • Abstract state management with concrete implementation flexibility
+        • Configurable state graphs with action-based transitions
 
-Architecture Patterns:
-    • Template Method: Defines execution structure, subclasses implement specifics
-    • Abstract Factory: Enables creation of different vehicle types
-    • Strategy Pattern: Pluggable behavior implementations for different missions
-    • Observer Pattern: Integration with discrete event simulation framework
+    Timer Management System:
+        • Automatic timer lifecycle management and cleanup
+        • Type-safe time calculations with unified unit system
+        • Performance-optimized timer advancement and removal
 
-Core Capabilities:
-    • High-precision geographic positioning with WGS84 coordinate system
-    • Comprehensive mission task assignment and execution management
-    • Structured lifecycle management with validation and cleanup phases
-    • Extensible behavior framework for vehicle-specific implementations
-    • Performance-optimized design for large-scale multi-vehicle simulations
+    Task Assignment Framework:
+        • Abstract task assignment interface for mission management
+        • Type-safe task handling with generic type support
+        • Extensible assignment logic for different vehicle capabilities
 
-Integration Architecture:
-    • SimPy: Discrete event simulation engine and process coordination
-    • Geo: WGS84 geographic coordinate system for real-world positioning
-    • Mission: Advanced task assignment and execution framework
-    • Unit: Type-safe time and measurement calculations
+Abstract Method Requirements:
+    Core Simulation Methods:
+        • assign(task): Task assignment evaluation and commitment
+        • update(dt, now): Primary vehicle behavior execution
+        • post_update(dt, now): Cleanup and coordination phase
+        • vehicle_update(dt, now): Vehicle-specific update logic
 
-Vehicle Operational Lifecycle:
-    1. Initialization: Environment binding and geographic positioning
-    2. Registration: Integration with simulation framework
-    3. Task Assignment: Mission reception and planning
-    4. Execution: Three-phase update cycles with state management
-    5. Termination: Graceful shutdown and resource cleanup
+    State Machine Methods:
+        • init_state_machine(): Configure state transitions and actions
+        • transition_to(): Request validated state transitions
+        • current_state: Access current state machine state
 
-Performance Characteristics:
-    • Optimized for concurrent execution of hundreds of vehicles
-    • Memory-efficient design with minimal object allocation overhead
-    • Configurable update granularity for accuracy vs. performance trade-offs
-    • Scalable architecture supporting heterogeneous vehicle fleets
+Key Features:
+    • State machine-driven behavior with validation
+    • Automatic timer management and cleanup
+    • Geographic positioning with WGS84 coordinate system
+    • Type-safe time and measurement handling
+    • Extensible architecture for specialized vehicle types
+    • Performance optimized for large fleet simulations
+
+Integration Points:
+    • ..state: State machine framework and validation
+    • ..geo: WGS84 geographic coordinate system
+    • ..mission: Task assignment and execution framework
+    • ..timer: Time management and scheduling utilities
+    • ..unit: Type-safe measurement and conversion system
+
+Example Implementation:
+    >>> class CustomDrone(Vehicle):
+    ...     def __init__(self, pos: GeoPoint):
+    ...         super().__init__(pos)
+    ...         # Initialize state machine with custom states
+    ...         self.init_state_machine(DroneState.IDLE, custom_state_graph)
+    ...
+    ...     def assign(self, task: Task) -> bool:
+    ...         # Custom assignment logic
+    ...         return self._evaluate_task_feasibility(task)
+    ...
+    ...     def update(self, dt: Time, now: Time) -> None:
+    ...         # Update timers and state machine
+    ...         self.timer_update(dt)
+    ...         self.vehicle_update(dt, now)
+    ...
+    ...     def vehicle_update(self, dt: Time, now: Time) -> None:
+    ...         # Vehicle-specific behavior based on current state
+    ...         if self.current_state == DroneState.FLYING:
+    ...             self._execute_flight_behavior(dt)
 """
 
 from __future__ import annotations
@@ -55,11 +79,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.geo import GeoPoint
-from app.mission import Task
-from app.state import State, StateGraph, StateMachine
-from app.timer import Timer
-from app.unit import Time
+from dronesim.geo import GeoPoint
+from dronesim.mission import Task
+from dronesim.state import State, StateGraph, StateMachine
+from dronesim.timer import Timer
+from dronesim.unit import Time
 
 
 class Vehicle(ABC):
@@ -90,6 +114,8 @@ class Vehicle(ABC):
         id (int): Unique vehicle identifier generated from memory address.
         position (GeoPoint): Current geographic coordinates using WGS84 datum
                            for precise Earth-surface positioning and navigation.
+        _state_machine (StateMachine | None): Internal state machine for validated
+                                            state transitions and behavior control.
         _timers (list[Timer]): Internal list of active timers for temporal
                               operations like delays, timeouts, and scheduling.
 
@@ -205,6 +231,25 @@ class Vehicle(ABC):
         self._state_machine = StateMachine(initial_state, nodes_graph)
 
     def transition_to(self, next_state: State, *args, **kwargs) -> Any:
+        """Request a state transition to the specified state.
+
+        Attempts to transition the vehicle's state machine to the target state,
+        validating that the transition is allowed according to the configured
+        state graph. Executes any associated action effects during the transition.
+
+        Args:
+            next_state (State): The target state to transition to.
+            *args: Additional arguments passed to transition action effects.
+            **kwargs: Additional keyword arguments passed to action effects.
+
+        Returns:
+            Any: The result of executing the transition action's effect function,
+                or None if the action has no effect.
+
+        Raises:
+            NotImplementedError: If the state machine has not been initialized.
+            ValueError: If the transition is not allowed by the state machine rules.
+        """
         if not type(self)._state_machine:
             msg = "Subclasses must initialize the state_machine"
             raise NotImplementedError(msg)
@@ -265,7 +310,7 @@ class Vehicle(ABC):
         pass
 
     @abstractmethod
-    def update(self, dt: float) -> None:
+    def update(self, dt: Time, now: Time) -> None:
         """Execute primary vehicle update logic for one simulation time step.
 
         Advances the vehicle's state during each simulation step, implementing
@@ -279,10 +324,11 @@ class Vehicle(ABC):
         4. Event generation and progress tracking
 
         Args:
-            dt (float): Time step duration in seconds. Determines how much
-                       simulation time passes during this update cycle.
-                       Used for physics calculations, energy consumption,
-                       and temporal state transitions. Must be positive.
+            dt (Time): Time step duration for this update cycle.
+                      Used for physics calculations, energy consumption,
+                      and temporal state transitions. Must be positive.
+            now (Time): Current simulation time for temporal operations
+                       and time-based decision making.
 
         Implementation Requirements:
             • Advance vehicle state by exactly one time step
@@ -309,7 +355,7 @@ class Vehicle(ABC):
         pass
 
     @abstractmethod
-    def post_update(self, dt: Time) -> None:
+    def post_update(self, dt: Time, now: Time) -> None:
         """Execute post-processing and cleanup after main simulation step.
 
         Final phase of the three-phase execution model, handling cleanup,
@@ -328,6 +374,8 @@ class Vehicle(ABC):
             dt (Time): Time step duration using unified time units.
                       Same interval as preceding update() phase,
                       used for time-based post-processing calculations.
+            now (Time): Current simulation time for temporal coordination
+                       and time-based post-processing operations.
 
         Implementation Requirements:
             • Must not modify primary vehicle state (position, energy)
@@ -360,7 +408,21 @@ class Vehicle(ABC):
         pass
 
     @abstractmethod
-    def vehicle_update(self, dt: Time) -> None:
+    def vehicle_update(self, dt: Time, now: Time) -> None:
+        """Execute vehicle-specific update logic for one simulation step.
+
+        Implements the core vehicle behavior logic that is specific to each
+        vehicle type. This method is called during the main update cycle and
+        should contain the primary operational logic for the vehicle.
+
+        Args:
+            dt (Time): Time step duration for this update cycle.
+            now (Time): Current simulation time for temporal operations.
+
+        Note:
+            This is an abstract method that must be implemented by concrete
+            vehicle subclasses to define their specific behavior patterns.
+        """
         pass
 
     def timer_update(self, dt: Time) -> None:

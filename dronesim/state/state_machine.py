@@ -7,14 +7,20 @@ execution flow.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any, TypeVar
 
-State = TypeVar("State", bound=Enum)
-"""Type variable for state enumerations that extend Enum."""
+State = TypeVar("State", bound=Enum | IntEnum)
+"""
+Type variable for state enumerations that extend Enum.
+"""
 
-ActionFn = Callable[[], None]
-"""Type alias for action effect functions that take no parameters."""
+ActionFn = Callable[[], Any]
+"""Type alias for action effect functions.
+
+Note: While declared as taking no parameters, these functions are called
+with *args and **kwargs in practice via Action.__call__().
+"""
 
 StateGraph = TypeVar("StateGraph", bound=dict[State, set["Action"]])
 
@@ -46,6 +52,7 @@ class Action:
         """
         if self.effect:
             return self.effect(*args, **kwargs)
+        return None
 
 
 class StateMachine:
@@ -81,6 +88,8 @@ class StateMachine:
 
         Args:
             next_state: The target state to transition to.
+            *args: Additional arguments passed to the action's effect function.
+            **kwargs: Additional keyword arguments passed to the action's effect function.
 
         Returns:
             The result of executing the transition action's effect function,

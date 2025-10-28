@@ -35,8 +35,8 @@ Common Use Cases:
     • Charging station management and scheduling
 
 Example:
-    >>> from app.energy import BatteryStatus, WattHour, WattSecond
-    >>> from app.unit import Second
+    >>> from dronesim.energy import BatteryStatus, WattHour, WattSecond
+    >>> from dronesim.unit import Second
     >>>
     >>> # Create a drone battery (5000 mAh at 11.1V ≈ 55.5 Wh)
     >>> battery = BatteryStatus(WattHour(55.5), WattHour(55.5))  # Capacity, current

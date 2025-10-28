@@ -8,7 +8,7 @@ conversion between different energy measurement systems commonly used in drone a
 management applications.
 """
 
-from app.unit import UnitFloat
+from dronesim.unit import UnitFloat
 
 
 class WattSecond(UnitFloat):
