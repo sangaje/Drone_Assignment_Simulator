@@ -25,6 +25,7 @@ Configuration:
 from enum import Enum, auto
 
 from app.geo import GeoPoint
+from app.state import Action, StateMachine
 
 from .task import Task
 
@@ -59,11 +60,14 @@ class DeliveryState(Enum):
 # Each state can progress to its normal next state or be aborted
 # Terminal states (DONE, ABORTED) have no allowed transitions
 _allowed = {
-    DeliveryState.ASSIGNED: [DeliveryState.GO_PICKUP, DeliveryState.ABORTED],
-    DeliveryState.GO_PICKUP: [DeliveryState.SERVICE_PICKUP, DeliveryState.ABORTED],
-    DeliveryState.SERVICE_PICKUP: [DeliveryState.GO_DROPOFF, DeliveryState.ABORTED],
-    DeliveryState.GO_DROPOFF: [DeliveryState.SERVICE_DROPOFF, DeliveryState.ABORTED],
-    DeliveryState.SERVICE_DROPOFF: [DeliveryState.DONE, DeliveryState.ABORTED],
+    DeliveryState.ASSIGNED: [Action(DeliveryState.GO_PICKUP), Action(DeliveryState.ABORTED)],
+    DeliveryState.GO_PICKUP: [Action(DeliveryState.SERVICE_PICKUP), Action(DeliveryState.ABORTED)],
+    DeliveryState.SERVICE_PICKUP: [Action(DeliveryState.GO_DROPOFF), Action(DeliveryState.ABORTED)],
+    DeliveryState.GO_DROPOFF: [
+        Action(DeliveryState.SERVICE_DROPOFF),
+        Action(DeliveryState.ABORTED),
+    ],
+    DeliveryState.SERVICE_DROPOFF: [Action(DeliveryState.DONE), Action(DeliveryState.ABORTED)],
     DeliveryState.DONE: [],
     DeliveryState.ABORTED: [],
 }
@@ -79,7 +83,7 @@ _next = {
 }
 
 
-class TaskDelivery(Task):
+class DeliveryTask(Task):
     """Concrete implementation of a package delivery task.
 
     This class implements the abstract Task interface to provide complete
@@ -107,13 +111,11 @@ class TaskDelivery(Task):
         >>> dropoff = GeoPoint.from_deg(37.5675, 126.9890)
         >>> delivery = TaskDelivery(pickup, dropoff)
         >>> print(delivery.current)  # DeliveryState.ASSIGNED
-        >>> delivery.next()          # Progress to GO_PICKUP
+        >>> delivery.next()  # Progress to GO_PICKUP
         >>> print(delivery.current)  # DeliveryState.GO_PICKUP
     """
 
-    state: DeliveryState
-    _allowed = _allowed
-    _next = _next
+    state_machine: StateMachine | None
 
     def __init__(self, origin: GeoPoint, destination: GeoPoint):
         """Initialize a new delivery task with pickup and dropoff locations.
@@ -127,7 +129,7 @@ class TaskDelivery(Task):
             destination (GeoPoint): Geographic location for package delivery.
         """
         super().__init__(origin, destination)
-        self.state = DeliveryState.ASSIGNED
+        self.init_state_machine(DeliveryState.ASSIGNED, _allowed)
 
     def next(self) -> DeliveryState:
         """Progress the task to the next state in the delivery sequence.
@@ -148,8 +150,8 @@ class TaskDelivery(Task):
             >>> delivery.next()  # ASSIGNED → GO_PICKUP
             >>> delivery.next()  # GO_PICKUP → SERVICE_PICKUP
         """
-        self.request_transition(_next[self.state])
-        return self.current
+        self.transition_to(_next[self.current_state])
+        return self.current_state
 
     def abort(self):
         """Abort the delivery task and transition to ABORTED state.
@@ -167,4 +169,4 @@ class TaskDelivery(Task):
             >>> delivery.abort()  # Emergency cancellation
             >>> print(delivery.current)  # DeliveryState.ABORTED
         """
-        self.request_transition(DeliveryState.ABORTED)
+        self.transition_to(DeliveryState.ABORTED)

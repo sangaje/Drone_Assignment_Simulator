@@ -1,11 +1,11 @@
 """Geographic coordinate utilities and functions.
 
-This module provides utilities for working with geographic coordinates,
-distance calculations, and spatial operations for the drone simulation.
+This module provides utilities for working with geographic coordinates, distance calculations, and
+spatial operations for the drone simulation.
 
-The module defines coordinate types (Latitude, Longitude) that extend the unit
-system, and a GeoPoint dataclass for representing geographic locations with
-geodesic distance calculations using the WGS84 ellipsoid.
+The module defines coordinate types (Latitude, Longitude) that extend the unit system, and a
+GeoPoint dataclass for representing geographic locations with geodesic distance calculations using
+the WGS84 ellipsoid.
 """
 
 from dataclasses import dataclass
@@ -32,7 +32,7 @@ class Latitude(Degree):
         >>> lat = Latitude(37.5665)  # Seoul latitude
         >>> float(lat)  # Internal radian value
         0.6556588...
-        >>> str(lat)    # Display value
+        >>> str(lat)  # Display value
         '37.5665 °N/S'
     """
 
@@ -55,7 +55,7 @@ class Longitude(Degree):
         >>> lon = Longitude(126.9780)  # Seoul longitude
         >>> float(lon)  # Internal radian value
         2.2161834...
-        >>> str(lon)    # Display value
+        >>> str(lon)  # Display value
         '126.978 °E/W'
     """
 
@@ -86,7 +86,7 @@ class GeoPoint:
         >>>
         >>> # Calculate distance
         >>> distance = seoul.distance_to(busan)
-        >>> print(f"Distance: {float(distance)/1000:.1f} km")
+        >>> print(f"Distance: {float(distance) / 1000:.1f} km")
         Distance: 325.4 km
         >>>
         >>> # Move to a new location
@@ -141,7 +141,7 @@ class GeoPoint:
         Example:
             >>> import math
             >>> # Create point using radian values
-            >>> point = GeoPoint.from_rad(math.pi/4, math.pi/3)  # 45°N, 60°E
+            >>> point = GeoPoint.from_rad(math.pi / 4, math.pi / 3)  # 45°N, 60°E
             >>> print(point)
             GeoPoint(latitude=45.0 °N/S, longitude=60.0 °E/W)
         """
@@ -178,7 +178,7 @@ class GeoPoint:
             >>> seoul = GeoPoint.from_deg(37.5665, 126.9780)
             >>> busan = GeoPoint.from_deg(35.1796, 129.0756)
             >>> distance = seoul.distance_to(busan)
-            >>> print(f"{float(distance)/1000:.1f} km")
+            >>> print(f"{float(distance) / 1000:.1f} km")
             325.4 km
         """
         az12, az21, dist = _WGS84.inv(
@@ -291,9 +291,7 @@ class GeoPoint:
         self.latitude = Latitude.from_si(lat)  # lat is already in radians
         self.longitude = Longitude.from_si(lon)  # lon is already in radians
 
-    def passed_through_target(
-        self, start_point: "GeoPoint", target: "GeoPoint"
-    ) -> bool:
+    def passed_through_target(self, start_point: "GeoPoint", target: "GeoPoint") -> bool:
         """Check if movement from start_point to current position passed through target.
 
         This method checks if the target point is within the rectangular bounding box
@@ -312,7 +310,7 @@ class GeoPoint:
             >>> # Drone movement simulation
             >>> drone = GeoPoint.from_deg(37.5665, 126.9780)
             >>> start_pos = GeoPoint.from_deg(37.5665, 126.9780)  # Save start position
-            >>> target = GeoPoint.from_deg(37.5675, 126.9790)    # Waypoint
+            >>> target = GeoPoint.from_deg(37.5675, 126.9790)  # Waypoint
             >>>
             >>> # Drone moves during simulation step
             >>> drone.move_to(Degree(45), Meter(2000))  # Move northeast 2km
@@ -331,11 +329,7 @@ class GeoPoint:
         target_lon = float(target.longitude)
 
         # Check if target is within the bounding box
-        lat_in_range = (
-            min(start_lat, current_lat) <= target_lat <= max(start_lat, current_lat)
-        )
-        lon_in_range = (
-            min(start_lon, current_lon) <= target_lon <= max(start_lon, current_lon)
-        )
+        lat_in_range = min(start_lat, current_lat) <= target_lat <= max(start_lat, current_lat)
+        lon_in_range = min(start_lon, current_lon) <= target_lon <= max(start_lon, current_lon)
 
         return lat_in_range and lon_in_range

@@ -78,4 +78,5 @@ class Kilowatt(Watt):
     SCALE_TO_SI = 1000.0
     SYMBOL = "kW"
 
+
 Power = Watt | Kilowatt

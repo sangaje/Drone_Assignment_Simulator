@@ -20,15 +20,14 @@ Example:
     ...     IS_FAMILY_ROOT = True
     ...     SCALE_TO_SI = 1.0
     ...     SYMBOL = "m"
-    ...
     >>> class Kilometer(Meter):
     ...     SCALE_TO_SI = 1000.0
     ...     SYMBOL = "km"
-    ...
     >>> distance = Kilometer(5.2)  # 5.2 km
     >>> print(distance)  # "5.2 km"
     >>> print(float(distance))  # 5200.0 (meters in SI)
 """
+
 from __future__ import annotations
 
 from typing import ClassVar
@@ -36,6 +35,7 @@ from typing import ClassVar
 from .unit_base import Unit
 
 Number = int | float
+
 
 class UnitFloat(float, Unit):
     """Base class for type-safe unit calculations with automatic SI conversion.

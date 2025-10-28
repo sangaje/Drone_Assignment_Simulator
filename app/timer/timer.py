@@ -171,9 +171,8 @@ class Timer:
         Example:
             >>> timer = Timer(Second(10.0))
             >>> timer._advance(Second(5.0))  # 5 seconds remaining
-            >>> timer.reset(Second(30.0))    # Reset to 30 seconds
+            >>> timer.reset(Second(30.0))  # Reset to 30 seconds
             >>> print(timer.duration)
             30.0 s
         """
         self._duration = duration
-

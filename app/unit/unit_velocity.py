@@ -84,6 +84,7 @@ class MetersPerHour(MeterPerSecond):
     SCALE_TO_SI = 1.0 / 3600.0
     SYMBOL = "m/h"
 
+
 class KilometersPerSecond(MeterPerSecond):
     """Velocity unit: Kilometers per Second.
 
@@ -108,6 +109,7 @@ class KilometersPerSecond(MeterPerSecond):
 
     SCALE_TO_SI = 1000.0
     SYMBOL = "km/s"
+
 
 class KilometersPerHour(MeterPerSecond):
     """Velocity unit: Kilometers per Hour.
@@ -134,7 +136,6 @@ class KilometersPerHour(MeterPerSecond):
     SCALE_TO_SI = 1000.0 / 3600.0  # ≈ 0.2778
     SYMBOL = "km/h"
 
+
 # Type alias for all velocity unit types
-Velocity = (
-    MeterPerSecond | MetersPerHour | KilometersPerSecond | KilometersPerHour
-)
+Velocity = MeterPerSecond | MetersPerHour | KilometersPerSecond | KilometersPerHour

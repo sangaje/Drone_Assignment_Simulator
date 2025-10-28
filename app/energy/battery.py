@@ -112,9 +112,7 @@ class BatteryStatus:
             raise ValueError(msg)
 
         if self._current >= energy:
-            self._current = type(self._current).from_si(
-                float(self._current) - float(energy)
-            )
+            self._current = type(self._current).from_si(float(self._current) - float(energy))
             return True
         return False
 
@@ -134,13 +132,9 @@ class BatteryStatus:
         available_capacity = type(self._capacity).from_si(
             float(self._capacity) - float(self._current)
         )
-        actual_charge = type(energy).from_si(
-            min(float(energy), float(available_capacity))
-        )
+        actual_charge = type(energy).from_si(min(float(energy), float(available_capacity)))
 
-        self._current = type(self._current).from_si(
-            float(self._current) + float(actual_charge)
-        )
+        self._current = type(self._current).from_si(float(self._current) + float(actual_charge))
         return actual_charge
 
     def is_empty(self) -> bool:

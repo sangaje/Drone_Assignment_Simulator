@@ -13,6 +13,7 @@ abstract methods for specific mission execution logic.
 Key Components:
     Task: Abstract base class defining the task interface
     State: Generic type variable for task-specific state enumerations
+    StateGraph: Type alias for state transition graph definitions
 
 Design Patterns:
     • Template Method: Base class provides structure, subclasses implement specifics
@@ -20,58 +21,88 @@ Design Patterns:
     • Abstract Factory: Extensible framework for different task types
 
 State Management:
-    Tasks maintain current state and validate transitions using configurable
-    rules defined in _allowed and _next dictionaries. This ensures tasks
-    follow proper execution sequences and handle error conditions appropriately.
+    Tasks use a StateMachine instance to manage state transitions with validation.
+    Subclasses MUST initialize the `state_machine` ClassVar with a StateMachine
+    instance configured with their specific state graph and initial state.
+
+Implementation Requirements:
+    Concrete task classes must define:
+    1. A state enumeration (e.g., TaskState(Enum))
+    2. A state transition graph (StateGraph)
+    3. Initialize state_machine ClassVar in class definition
+    4. Implement abstract methods (execute, abort)
+
+Example:
+    class MyTaskState(Enum):
+        PENDING = "pending"
+        RUNNING = "running"
+        COMPLETED = "completed"
+
+    class MyTask(Task):
+        # REQUIRED: Initialize state_machine ClassVar
+        state_machine: ClassVar[StateMachine] = StateMachine(
+            initial_state=MyTaskState.PENDING,
+            nodes_graph={...}  # Define your state transitions
+        )
 """
 
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import TypeVar
+from typing import Any
 
 from app.geo import GeoPoint
-
-State = TypeVar("State", bound=Enum)
+from app.state import State, StateGraph, StateMachine
 
 
 class Task(ABC):
-    """Abstract base class defining a mission task interface.
+    """Abstract base class defining a mission task interface with state management.
 
     This ABC establishes the contract that all mission task implementations
     must follow within the simulation environment. It provides essential
-    infrastructure for task identification and simulation integration while
-    requiring subclasses to implement their specific execution logic.
+    infrastructure for task identification, geographic waypoints, and state
+    machine management while requiring subclasses to implement their specific
+    execution logic.
 
     The Task class follows the Template Method design pattern, providing
     concrete implementations for common operations (initialization, identification)
-    while deferring task-specific behaviors to the abstract execute() method.
+    while deferring task-specific behaviors to abstract methods.
 
     Attributes:
-        env (simpy.Environment): The discrete event simulation environment.
-                                This provides access to simulation time, event
-                                scheduling, and process management.
-        id (int): Unique identifier generated from the object's memory address.
-                 Used for tracking and distinguishing task instances.
+        id: Unique identifier generated from the object's memory address.
+        origin: Starting geographic location for the task.
+        destination: Target geographic location for the task.
+        state_machine: ClassVar containing the StateMachine instance for state management.
+                      MUST be initialized by subclasses with appropriate state graph.
 
     Abstract Methods:
-        execute(): Task-specific execution implementation called when the
-                   task is started within the simulation.
+        abort(): Task-specific abort implementation for cleanup and state transition.
+
+    Class Variable Requirements:
+        Subclasses MUST define and initialize the state_machine ClassVar:
+
+        state_machine: ClassVar[StateMachine] = StateMachine(
+            initial_state=YourTaskState.INITIAL,
+            nodes_graph={...}  # Your state transition rules
+        )
 
     Example:
-        >>> class SimpleTask(Task):
-        ...     def execute(self):
-        ...         print(f"Task {self.id} executing at time {self.env.now}")
+        >>> class DeliveryTaskState(Enum):
+        ...     PENDING = "pending"
+        ...     IN_PROGRESS = "in_progress"
+        ...     COMPLETED = "completed"
+        >>> class DeliveryTask(Task):
+        ...     state_machine: ClassVar[StateMachine] = StateMachine(
+        ...         initial_state=DeliveryTaskState.PENDING, nodes_graph={...}
+        ...     )
         ...
-        >>> env = simpy.Environment()
-        >>> task = SimpleTask(env)
+        ...     def abort(self):
+        ...         self.state_machine.request_transition(DeliveryTaskState.ABORTED)
     """
 
     id: int
     origin: GeoPoint
     destination: GeoPoint
 
-    _allowed: dict[State, set[State]] = {}
-    _next: dict[State, State] = {}
+    _state_machine: StateMachine | None = None
 
     def __init__(self, origin: GeoPoint, destination: GeoPoint):
         """Initialize a new Task instance with origin and destination points.
@@ -84,57 +115,45 @@ class Task(ABC):
         self.origin = origin
         self.destination = destination
 
-    def request_transition(self, next_state: State):
-        """Request a state transition to the specified next state.
+    def init_state_machine(self, initial_state: State, nodes_graph: StateGraph) -> None:
+        """Initialize the state machine for the task.
 
-        Validates the transition is legal according to the task's state machine
-        rules before updating the current state. Raises ValueError if the
-        transition is not allowed.
-
-        Args:
-            next_state (State): The target state to transition to.
+        This method can be called to set up the state machine if not
+        initialized at class definition time. Subclasses may override
+        this method to provide custom initialization logic.
 
         Raises:
-            ValueError: If the transition from current state to next_state
-                       is not allowed by the task's state machine rules.
+            NotImplementedError: If the subclass does not implement
+                                 state machine initialization.
         """
-        self._validate_transition(self.current(), next_state)
-        self.state = next_state
+        self._state_machine = StateMachine(initial_state, nodes_graph)
 
     @abstractmethod
     def abort(self):
         """Abort the current task and transition to aborted state.
 
-        This abstract method must be implemented by subclasses to define
-        task-specific abort behavior. Typically transitions the task to
-        an ABORTED state and performs any necessary cleanup operations.
+        This abstract method must be implemented by subclasses to define task-specific abort
+        behavior. Typically transitions the task to an ABORTED state and performs any necessary
+        cleanup operations.
         """
         pass
 
+    def transition_to(self, next_state: State, *args, **kwargs) -> Any:
+        if not type(self)._state_machine:
+            msg = "Subclasses must initialize the state_machine ClassVar."
+            raise NotImplementedError(msg)
+
+        return type(self)._state_machine.request_transition(next_state, *args, **kwargs)
+
     @property
-    def current(self) -> State:
-        """Get the current state of the task.
+    def current_state(self) -> State:
+        """Get the current state of the task from the state machine.
 
         Returns:
-            State: The current state enumeration value for this task.
+            State: The current state of the task as managed by the state machine.
         """
-        return self.state
+        if not self._state_machine:
+            msg = "Subclasses must initialize the state_machine"
+            raise NotImplementedError(msg)
 
-    def _validate_transition(self, frm: State, to: State) -> None:
-        """Validate that a state transition is allowed by the state machine rules.
-
-        Checks the _allowed dictionary to determine if transitioning from
-        the current state to the target state is permitted. This enforces
-        the task's state machine constraints and prevents invalid state changes.
-
-        Args:
-            frm (State): The current state to transition from.
-            to (State): The target state to transition to.
-
-        Raises:
-            ValueError: If the transition is not allowed according to the
-                       task's state machine rules defined in _allowed.
-        """
-        if to not in self._allowed.get(frm, set()):
-            msg = f"Illegal transition {frm.name} → {to.name}"
-            raise ValueError(msg)
+        return self._state_machine.current

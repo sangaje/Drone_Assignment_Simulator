@@ -14,7 +14,7 @@ Type Aliases:
 
 Example:
     >>> duration = Hour(2.5)  # 2.5 hours
-    >>> print(duration)       # "2.5 h"
+    >>> print(duration)  # "2.5 h"
     >>> print(float(duration))  # 9000.0 (seconds in SI)
     >>>
     >>> meeting_time = Minute(30)  # 30 minutes

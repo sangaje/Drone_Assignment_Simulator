@@ -53,9 +53,11 @@ Performance Characteristics:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from app.geo import GeoPoint
 from app.mission import Task
+from app.state import State, StateGraph, StateMachine
 from app.timer import Timer
 from app.unit import Time
 
@@ -131,13 +133,13 @@ class Vehicle(ABC):
         ...     def post_update(self, dt: Time) -> None:
         ...         self._log_telemetry(dt)
         ...         self._validate_state()
-        ...
         >>> start_pos = GeoPoint.from_deg(37.5665, 126.9780)  # Seoul
         >>> drone = Drone(start_pos)
     """
 
     id: int
     position: GeoPoint
+    _state_machine: StateMachine | None = None
     _timers: list[Timer]
 
     def __init__(
@@ -188,6 +190,39 @@ class Vehicle(ABC):
         self.id = id(self)
         self.position = pos
         self._timers = []
+
+    def init_state_machine(self, initial_state: State, nodes_graph: StateGraph) -> None:
+        """Initialize the state machine for the task.
+
+        This method can be called to set up the state machine if not
+        initialized at class definition time. Subclasses may override
+        this method to provide custom initialization logic.
+
+        Raises:
+            NotImplementedError: If the subclass does not implement
+                                 state machine initialization.
+        """
+        self._state_machine = StateMachine(initial_state, nodes_graph)
+
+    def transition_to(self, next_state: State, *args, **kwargs) -> Any:
+        if not type(self)._state_machine:
+            msg = "Subclasses must initialize the state_machine"
+            raise NotImplementedError(msg)
+
+        return type(self)._state_machine.request_transition(next_state, *args, **kwargs)
+
+    @property
+    def current_state(self) -> State:
+        """Get the current state of the task from the state machine.
+
+        Returns:
+            State: The current state of the task as managed by the state machine.
+        """
+        if not self._state_machine:
+            msg = "Subclasses must initialize the state_machine"
+            raise NotImplementedError(msg)
+
+        return self._state_machine.current
 
     @abstractmethod
     def assign(self, task: Task) -> bool:
@@ -322,6 +357,10 @@ class Vehicle(ABC):
             ...     # Validate state consistency
             ...     self._validate_constraints()
         """
+        pass
+
+    @abstractmethod
+    def vehicle_update(self, dt: Time) -> None:
         pass
 
     def timer_update(self, dt: Time) -> None:

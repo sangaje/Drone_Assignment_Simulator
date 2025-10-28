@@ -47,10 +47,7 @@ Example:
     >>> start_pos = GeoPoint.from_deg(37.5665, 126.9780)  # Seoul
     >>> battery = BatteryStatus(WattHour(55.5), WattHour(55.5))  # 55.5 Wh battery
     >>> drone = Drone(
-    ...     pos=start_pos,
-    ...     battery=battery,
-    ...     velocity=KilometersPerHour(50),
-    ...     power_transit=Watt(15.5)
+    ...     pos=start_pos, battery=battery, velocity=KilometersPerHour(50), power_transit=Watt(15.5)
     ... )
     >>>
     >>> # Check drone status

@@ -53,7 +53,7 @@ Example:
     >>>
     >>> # Unit conversions within families
     >>> heading_rad = heading.to(Radian)  # Convert to radians
-    >>> range_m = range_limit.to(Meter)   # Convert to meters
+    >>> range_m = range_limit.to(Meter)  # Convert to meters
 
 Available Units:
     Angular Units:
@@ -94,27 +94,27 @@ from .unit_velocity import (
 # Define public API
 __all__ = [
     # Base classes
-    'Unit',
-    'UnitFloat',
+    "Unit",
+    "UnitFloat",
     # Angular units
-    'Radian',
-    'Degree',
+    "Radian",
+    "Degree",
     # Distance units
-    'Meter',
-    'Kilometer',
+    "Meter",
+    "Kilometer",
     # Time units
-    'Second',
-    'Minute',
-    'Hour',
-    'Time',
+    "Second",
+    "Minute",
+    "Hour",
+    "Time",
     # Velocity units
-    'MeterPerSecond',
-    'MetersPerHour',
-    'KilometersPerSecond',
-    'KilometersPerHour',
-    'Velocity',
+    "MeterPerSecond",
+    "MetersPerHour",
+    "KilometersPerSecond",
+    "KilometersPerHour",
+    "Velocity",
     # Power units
-    'Watt',
-    'Kilowatt',
-    'Power',
+    "Watt",
+    "Kilowatt",
+    "Power",
 ]

@@ -23,21 +23,21 @@ Classes:
 Example:
     >>> class Length(Unit):
     ...     IS_FAMILY_ROOT = True  # This becomes the ROOT for length units
-    ...
     >>> class Meter(Length):
     ...     pass  # Automatically gets ROOT = Length
-    ...
     >>> class Foot(Length):
     ...     pass  # Also gets ROOT = Length
-    ...
     >>> # Meter and Foot can operate together (same ROOT)
     >>> # But Length units cannot operate with Time units (different ROOT)
 """
+
 from __future__ import annotations
 
 from typing import ClassVar
 
 Number = int | float
+
+
 class Unit:
     """Base class for all unit types in the simulation.
 

@@ -37,17 +37,17 @@ Example:
     >>> from app.geo import GeoPoint
     >>>
     >>> # Create delivery mission
-    >>> pickup = GeoPoint.from_deg(37.5665, 126.9780)    # Seoul
-    >>> dropoff = GeoPoint.from_deg(37.5675, 126.9890)   # Destination
+    >>> pickup = GeoPoint.from_deg(37.5665, 126.9780)  # Seoul
+    >>> dropoff = GeoPoint.from_deg(37.5675, 126.9890)  # Destination
     >>> delivery = TaskDelivery(pickup, dropoff)
     >>>
     >>> # Progress through states
     >>> print(f"Initial state: {delivery.current}")  # ASSIGNED
     >>> delivery.next()  # Transition to GO_PICKUP
-    >>> print(f"Next state: {delivery.current}")     # GO_PICKUP
+    >>> print(f"Next state: {delivery.current}")  # GO_PICKUP
 """
 
 from .task import Task
-from .task_delivery import DeliveryState, TaskDelivery
+from .task_delivery import DeliveryState, DeliveryTask
 
-__all__ = ["Task", "TaskDelivery", "DeliveryState"]
+__all__ = ["Task", "DeliveryTask", "DeliveryState"]
