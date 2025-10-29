@@ -77,10 +77,7 @@ Usage Examples:
         >>> start_pos = GeoPoint.from_deg(37.5665, 126.9780)  # Seoul coordinates
         >>> battery = BatteryStatus(WattHour(100.0), WattHour(85.0))  # 100Wh capacity, 85Wh current
         >>> drone = Drone(
-        ...     pos=start_pos,
-        ...     battery=battery,
-        ...     velocity=KilometersPerHour(60.0),
-        ...     power_transit=Watt(25.0)
+        ...     pos=start_pos, battery=battery, velocity=KilometersPerHour(60.0), power_transit=Watt(25.0)
         ... )
 
     Specialized Delivery Operations:

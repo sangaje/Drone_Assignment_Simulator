@@ -839,7 +839,6 @@ class Drone[T: Task](Vehicle):
         """
         pass
 
-
     def update(self, dt: Time) -> None:
         """Execute delivery-specific update logic for one simulation step.
 
@@ -858,7 +857,10 @@ class Drone[T: Task](Vehicle):
         used_battery = WattSecond(float(self._battery_usage) * float(dt))
         self.battery.consume_energy(used_battery)
 
-    def fixed_update(self, dt: Time, ) -> None:
+    def fixed_update(
+        self,
+        dt: Time,
+    ) -> None:
         """Execute fixed-interval update logic for delivery drone.
 
         Handles any delivery-specific fixed update behaviors required at
