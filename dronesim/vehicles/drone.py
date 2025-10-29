@@ -79,7 +79,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from dronesim.energy import BatteryStatus
+from dronesim.energy import BatteryStatus, WattSecond
 from dronesim.geo import GeoPoint
 from dronesim.mission import Task
 from dronesim.state import Action, ActionFn
@@ -206,7 +206,7 @@ class Drone[T: Task](Vehicle):
         This class provides hook methods that subclasses can override for customization:
 
         Core Update Method:
-        • vehicle_update(dt): Main update loop called each simulation step
+        • vehicle_update(dt, now): Main update loop called each simulation step
           Override to implement specialized drone behavior and logic
 
         State Behavior Methods (called continuously while in state):
@@ -242,6 +242,7 @@ class Drone[T: Task](Vehicle):
         _on_actions (dict[DroneState, ActionFn]): State behavior method mapping
         _battery_usage (Power): Current power consumption rate
         _vlot_timer (Timer | None): Timer for vertical operations (takeoff/landing)
+        _max_task_queue_size (int): Maximum allowed size for task queue (0 = unlimited)
 
     Usage Pattern:
         class SpecializedDrone(Drone[MyTaskType]):
@@ -272,6 +273,7 @@ class Drone[T: Task](Vehicle):
     _on_actions: dict[DroneState, ActionFn]
     _battery_usage: Power
     _vlot_timer: Timer | None
+    _max_task_queue_size: int
 
     def __init__(
         self,
@@ -284,6 +286,7 @@ class Drone[T: Task](Vehicle):
         power_transit: Power = DEFAULT_CONSUMPTION,
         operational_battery_percentage: float = DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE,
         base_pos: dict[GeoPoint] | None = None,
+        max_task_queue_size: int = 0,
     ):
         """Initialize a new Drone instance with operational parameters.
 
@@ -311,6 +314,8 @@ class Drone[T: Task](Vehicle):
             base_pos (dict[GeoPoint] | None): Dictionary of base station positions
                 keyed by unique identifiers. If None, creates a single base station
                 at the initial position.
+            max_task_queue_size (int): Maximum number of tasks allowed in the queue.
+                Set to 0 for unlimited queue size. Defaults to 0 (unlimited).
 
         Raises:
             ValueError: If operational_battery_percentage is not between 0.0 and 100.0.
@@ -342,6 +347,7 @@ class Drone[T: Task](Vehicle):
         self._task_queue = deque()
         self._tasks_current = None
         self._battery_usage = self.power_idle
+        self._max_task_queue_size = max_task_queue_size
 
         self._current_destination = None
         self.init_state_machine(
@@ -494,13 +500,31 @@ class Drone[T: Task](Vehicle):
         )
 
     def is_operational(self) -> bool:
-        """Check if the drone is operational (has sufficient battery).
+        """Check if the drone is operational and can accept new tasks.
+
+        Evaluates the drone's operational status by checking multiple criteria:
+        - Battery level must be above the operational threshold percentage
+        - Task queue must not exceed the maximum configured size (if set)
 
         Returns:
-            bool: True if the drone has sufficient battery to operate, False otherwise.
+            bool: True if the drone meets all operational criteria and can accept
+                  new tasks, False otherwise.
+
+        Note:
+            A drone is considered operational when both battery and task queue
+            constraints are satisfied. If max_task_queue_size is 0 (unlimited),
+            only battery level is checked.
         """
         # Consider drone operational if battery is above operational threshold
-        return self.battery.percentage > self.operational_battery_percentage
+
+        battery_ok = self.battery.percentage > self.operational_battery_percentage
+
+        if self._max_task_queue_size == 0:
+            tasks_queue_ok = True
+        else:
+            tasks_queue_ok = len(self._task_queue) < self._max_task_queue_size
+
+        return battery_ok and tasks_queue_ok
 
     def assign(self, task: T) -> bool:
         """Assign a task to this drone.
@@ -812,5 +836,36 @@ class Drone[T: Task](Vehicle):
                 self.transmit_mayday()              # Distress signal
                 self.activate_emergency_beacon()    # Location beacon
                 self.shutdown_non_critical()        # System preservation
+        """
+        pass
+
+
+    def update(self, dt: Time) -> None:
+        """Execute delivery-specific update logic for one simulation step.
+
+        Handles delivery-oriented behaviors including package transportation,
+        delivery route following, recipient location navigation, and
+        delivery completion procedures during each simulation time step.
+
+        Args:
+            dt (Time): Time step duration in simulation time units.
+
+        Note:
+            This implementation extends the base Vehicle update method with
+            delivery-specific logic while maintaining the standard simulation
+            update pattern.
+        """
+        used_battery = WattSecond(float(self._battery_usage) * float(dt))
+        self.battery.consume_energy(used_battery)
+
+    def fixed_update(self, dt: Time, ) -> None:
+        """Execute fixed-interval update logic for delivery drone.
+
+        Handles any delivery-specific fixed update behaviors required at
+        consistent time intervals, such as periodic status checks or
+        delivery progress evaluations.
+
+        Args:
+            dt (Time): Fixed time step duration for this update cycle.
         """
         pass

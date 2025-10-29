@@ -71,7 +71,6 @@ Example Usage:
     >>> success = drone.assign(delivery)  # Only accepts DeliveryTask
 """
 
-from dronesim.energy import WattSecond
 from dronesim.mission import DeliveryState, DeliveryTask
 from dronesim.unit import Time
 
@@ -120,25 +119,33 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     _current_mission: DeliveryTask | None = None
 
-    def update(self, dt: Time) -> None:
-        """Execute delivery-specific update logic for one simulation step.
+    def _try_assign_new_destination(self, now: Time) -> None:
+        """Attempt to assign a new destination based on pending delivery tasks.
 
-        Handles delivery-oriented behaviors including package transportation,
-        delivery route following, recipient location navigation, and
-        delivery completion procedures during each simulation time step.
+        Intelligently selects the next destination by analyzing the current delivery
+        tasks and their states. Prioritizes tasks based on their progression through
+        the delivery workflow and selects the closest task for optimal routing.
+
+        The method implements a two-phase destination selection:
+        1. State-based prioritization: Tasks in earlier states take precedence
+        2. Distance-based optimization: Among tasks in the same state, select closest
 
         Args:
-            dt (Time): Time step duration in simulation time units.
+            now (Time): Current simulation time for task state progression.
 
-        Note:
-            This implementation extends the base Vehicle update method with
-            delivery-specific logic while maintaining the standard simulation
-            update pattern.
+        Behavior:
+            - Returns early if no tasks are available
+            - Moves queued tasks to current_tasks if needed
+            - Finds minimum state among all current tasks
+            - Assigns destination based on task state (ASSIGNED→origin, SERVICE_PICKUP→destination)
+            - Sets current mission and initiates flight sequence
+
+        Side Effects:
+            - Modifies current_destination property
+            - Updates _current_mission reference
+            - Progresses selected task through state machine
+            - Initiates takeoff sequence via _start_flight()
         """
-        used_battery = WattSecond(float(self._battery_usage) * float(dt))
-        self.battery.consume_energy(used_battery)
-
-    def _try_assign_new_destination(self, now: Time) -> None:
         if self.current_tasks is None and len(self.task_queue) == 0:
             return
         if self.current_tasks is None:
@@ -168,7 +175,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._current_mission.next(now)
         self._start_flight(now)
 
-    def on_grounded(self, dt, now):
+    def on_grounded(self, dt: Time, now: Time):
         """Handle delivery drone behavior while in grounded state.
 
         Executes delivery-specific grounded behavior including task assignment
@@ -176,15 +183,42 @@ class DeliveryDrone(Drone[DeliveryTask]):
         Calls the parent grounded behavior then attempts to assign new destinations
         if no current destination is set.
 
+        This method handles service operations for pickup and dropoff states,
+        managing timing constraints and state progression for delivery tasks.
+
         Args:
-            dt: Time step duration for this update cycle.
-            now: Current simulation time for temporal operations.
+            dt (Time): Time step duration for this update cycle.
+            now (Time): Current simulation time for temporal operations.
+
+        Note:
+            Includes nested functions for handling pickup and dropoff waiting
+            periods based on delivery task timing requirements.
         """
+        def wait_for_pickup(current_mission: DeliveryTask):
+            if current_mission.current_state is DeliveryState.SERVICE_PICKUP:
+                if current_mission.pickup_time >= now:
+                    current_mission.next(now)
+
+        def wait_for_dropoff(current_mission: DeliveryTask):
+            if current_mission.current_state is DeliveryState.SERVICE_DROPOFF:
+                current_mission.next(now)
+
         super().on_grounded(dt, now)
+
         if self.current_destination is None:
+            if self._current_mission not in DeliveryTask.ground_task():
+                pass
+
+            elif self._current_mission is not None:
+                wait_for_pickup(self._current_mission)
+                wait_for_dropoff(self._current_mission)
+                return
+
+
+
             self._try_assign_new_destination(now)
 
-    def enter_grounded(self, now):
+    def enter_grounded(self, now: Time):
         """Handle delivery drone state entry into grounded state.
 
         Executes delivery-specific logic when transitioning into the grounded state,
@@ -192,15 +226,21 @@ class DeliveryDrone(Drone[DeliveryTask]):
         Advances the current delivery mission through its state machine and handles
         completion or cleanup as appropriate.
 
+        This method automatically progresses the delivery task state and performs
+        cleanup operations for completed missions, removing them from the active
+        task list when they reach the DONE state.
+
         Args:
-            now: Current simulation time for mission state progression.
+            now (Time): Current simulation time for mission state progression.
+
+        Side Effects:
+            - Progresses current mission through delivery state machine
+            - Removes completed missions from current_tasks list
+            - Resets _current_mission to None after processing
         """
         super().enter_grounded(now)
         if self._current_mission is not None:
             self._current_mission.next(now)
-
-            if self._current_mission.current_state in DeliveryTask.ground_task():
-                self._current_mission.next(now)
 
             if self._current_mission.current_state == DeliveryState.DONE:
                 self.current_tasks.remove(self._current_mission)

@@ -134,20 +134,43 @@ class DeliveryTask(Task):
 
     _event_time: dict[DeliveryState, Time | None]
 
+    order_time: Time
+    pickup_time: Time  # Time allocated for pickup service
+
     state_machine: StateMachine | None
 
-    def __init__(self, origin: GeoPoint, destination: GeoPoint):
+    def __init__(
+        self,
+        origin: GeoPoint,
+        destination: GeoPoint,
+        order_time: Time,
+        pickup_time: Time,
+        id: int | None = None,
+    ):
         """Initialize a new delivery task with pickup and dropoff locations.
 
         Creates a new delivery task in the ASSIGNED state with the specified
-        pickup and delivery locations. The task is ready to begin execution
-        through the state progression sequence.
+        pickup and delivery locations, timing constraints, and optional identifier.
+        The task is ready to begin execution through the state progression sequence.
+
+        Initializes the state machine with ASSIGNED as the starting state and
+        sets up event time tracking for all delivery states. The task includes
+        timing information for order placement and pickup service allocation.
 
         Args:
             origin (GeoPoint): Geographic location for package pickup.
             destination (GeoPoint): Geographic location for package delivery.
+            order_time (Time): Time when the delivery order was placed.
+            pickup_time (Time): Time allocated for pickup service operations.
+            id (int | None): Optional unique identifier for this task instance.
+                           If None, a unique ID will be generated automatically.
+
+        Side Effects:
+            - Initializes state machine with ASSIGNED state
+            - Creates event time tracking dictionary for all states
+            - Sets order_time and pickup_time attributes
         """
-        super().__init__(origin, destination)
+        super().__init__(origin, destination, id)
         self.init_state_machine(DeliveryState.ASSIGNED, self._allowed)
         self._event_time = {
             DeliveryState.ASSIGNED: None,
@@ -158,6 +181,8 @@ class DeliveryTask(Task):
             DeliveryState.DONE: None,
             DeliveryState.ABORTED: None,
         }
+
+        self.order_time, self.pickup_time = order_time, pickup_time
 
     @property
     def event_time(self) -> dict[DeliveryState, Time | None]:

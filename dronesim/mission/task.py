@@ -104,14 +104,28 @@ class Task(ABC):
 
     _state_machine: StateMachine | None = None
 
-    def __init__(self, origin: GeoPoint, destination: GeoPoint):
+    def __init__(self, origin: GeoPoint, destination: GeoPoint, id: int | None = None):
         """Initialize a new Task instance with origin and destination points.
+
+        Creates a new task with specified geographic waypoints and optional identifier.
+        If no ID is provided, generates a unique identifier using the object's
+        memory address as a fallback mechanism.
 
         Args:
             origin (GeoPoint): Starting geographic location for the task.
             destination (GeoPoint): Target geographic location for the task.
+            id (int | None): Optional unique identifier for this task instance.
+                           If None, generates ID using built-in id() function.
+
+        Note:
+            The state machine must be initialized separately by calling
+            init_state_machine() or by subclass-specific initialization.
         """
-        self.id = id(self)
+        if id is None:
+            self.id = id(self)
+        else:
+            self.id = id
+
         self.origin = origin
         self.destination = destination
 
