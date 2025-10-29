@@ -5,7 +5,7 @@ description = "Default template for PDM package"
 authors = [
     {name = "sangaje",email = "qhals8380@gmail.com"},
 ]
-dependencies = ["simpy>=4.1.1", "pint>=0.25", "pyproj>=3.7.2", "numpy>=2.3.4"]
+dependencies = ["simpy>=4.1.1", "pint>=0.25", "pyproj>=3.7.2", "numpy>=2.3.4", "rich>=14.2.0", "rich-progress>=0.4.0"]
 requires-python = "==3.12.*"
 readme = "README.md"
 license = {text = "MIT"}

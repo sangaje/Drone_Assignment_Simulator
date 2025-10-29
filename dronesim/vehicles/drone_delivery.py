@@ -206,17 +206,14 @@ class DeliveryDrone(Drone[DeliveryTask]):
         super().on_grounded(dt, now)
 
         if self.current_destination is None:
-            if self._current_mission not in DeliveryTask.ground_task():
-                pass
-
-            elif self._current_mission is not None:
+            if self._current_mission in DeliveryTask.ground_task():
                 wait_for_pickup(self._current_mission)
                 wait_for_dropoff(self._current_mission)
                 return
-
-
-
+            
             self._try_assign_new_destination(now)
+            return
+
 
     def enter_grounded(self, now: Time):
         """Handle delivery drone state entry into grounded state.
@@ -244,5 +241,4 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
             if self._current_mission.current_state == DeliveryState.DONE:
                 self.current_tasks.remove(self._current_mission)
-
-            self._current_mission = None
+                self._current_mission = None
