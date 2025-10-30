@@ -906,8 +906,8 @@ class Task(ABC):
 
         return self._state_machine.current
 
-    @abstractmethod
     @property
+    @abstractmethod
     def done(self) -> bool:
         """Determine task completion status with comprehensive terminal state detection.
 
