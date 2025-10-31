@@ -843,11 +843,11 @@ class Task(ABC):
             • Efficient action execution with direct method invocation
             • Memory-efficient state tracking without unnecessary allocations
         """
-        if not type(self)._state_machine:
+        if not self._state_machine:
             msg = "Subclasses must initialize the state_machine ClassVar."
             raise NotImplementedError(msg)
 
-        return type(self)._state_machine.request_transition(next_state, *args, **kwargs)
+        return self._state_machine.request_transition(next_state, *args, **kwargs)
 
     @property
     def current_state(self) -> State:
@@ -998,3 +998,15 @@ class Task(ABC):
                 >>> success_rate = len([t for t in completed_tasks if t.current_state == TaskState.COMPLETED])
         """
         pass
+
+    def state_list(self) -> list[State]:
+        """Get a list of all states defined in the drone's state machine.
+
+        Returns:
+            A list of all states that have defined transitions in the drone's state machine.
+        """
+        if not hasattr(self, "_state_machine"):
+            msg = "Subclasses must initialize the state_machine ClassVar."
+            raise NotImplementedError(msg)
+
+        return self._state_machine.get_state_list()

@@ -10,8 +10,9 @@ the WGS84 ellipsoid.
 
 from dataclasses import dataclass
 
-from dronesim.unit import Angle, Degree, Length, Meter, Radian
 from pyproj import Geod
+
+from dronesim.unit import Angle, Degree, Length, Meter, Radian
 
 # WGS84 geodesic calculator for accurate Earth surface calculations
 _WGS84 = Geod(ellps="WGS84")
@@ -259,7 +260,7 @@ class GeoPoint:
             >>> print(point_east)
             GeoPoint(latitude=37.5665 °N/S, longitude=126.989 °E/W)
         """
-        lon, lat = self._move_to(azimuth, distance)
+        lat, lon = self._move_to(azimuth, distance)
 
         latitude = Latitude.from_si(lat)  # lat is already in radians
         longitude = Longitude.from_si(lon)  # lon is already in radians

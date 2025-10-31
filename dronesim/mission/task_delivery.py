@@ -154,7 +154,7 @@ from __future__ import annotations
 from enum import IntEnum, auto
 
 from dronesim.geo import GeoPoint
-from dronesim.state import Action, StateMachine
+from dronesim.state import Action
 from dronesim.unit import Time
 
 from .task import Task
@@ -486,8 +486,6 @@ class DeliveryTask(Task):
 
     order_time: Time
     pickup_time: Time  # Time allocated for pickup service
-
-    state_machine: StateMachine | None
 
     def __init__(
         self,

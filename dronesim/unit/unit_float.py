@@ -356,4 +356,5 @@ class UnitFloat(float, Unit):
         Returns:
             str: Value in native scale with SI equivalent (e.g., "90 ° (= 1.5708 SI)").
         """
-        return f"{self.to(type(self)):g} {type(self).SYMBOL} (= {float(self):g} SI)"
+        symbol = self.ROOT.SYMBOL if self.ROOT.SYMBOL else "SI"
+        return f"{self.to(type(self)):g} {type(self).SYMBOL} (= {float(self):g} {symbol})"

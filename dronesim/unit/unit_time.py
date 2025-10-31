@@ -23,6 +23,8 @@ Example:
 
 from __future__ import annotations
 
+from math import isfinite
+
 from .unit_float import UnitFloat
 
 
@@ -90,5 +92,57 @@ class Hour(Second):
     SCALE_TO_SI = 3600.0
     SYMBOL = "h"
 
+class ClockTime(Second):
+    """Time unit: Clock Time (24-hour format).
 
-Time = Second | Minute | Hour  # Type alias for any time unit
+    The ClockTime class represents time in a 24-hour clock format.
+    It is based on seconds but is used to denote specific times of the day.
+
+    Attributes:
+        SCALE_TO_SI (float): 1.0, no conversion needed for SI base unit.
+        SYMBOL (str): "ct", the standard symbol for clock time.
+
+    Example:
+        >>> meeting_time = ClockTime(36000)  # 10:00 AM
+        >>> print(meeting_time)  # "36000 ct"
+        >>> print(float(meeting_time))  # 36000.0 (seconds)
+    """
+
+    SCALE_TO_SI = 1.0
+
+    @classmethod
+    def from_str(cls, time_str: str) -> ClockTime:
+        """Create ClockTime instance from a "HH:MM:SS" formatted string.
+
+        Args:
+            time_str (str): Time string in "HH:MM:SS" format.
+
+        Returns:
+            ClockTime: Instance representing the specified time.
+        """
+        h, m, s = map(float, time_str.split(":"))
+        total_seconds = h * 3600 + m * 60 + s
+        return cls(total_seconds)
+
+    def __str__(self) -> str:
+        """Return human-readable string representation in the unit's native scale.
+
+        Returns:
+            str: Value and symbol in the unit's natural scale (e.g., "90.0 °").
+        """
+        if not isfinite(float(self)):        # ← NaN, ±inf 방어
+            return "—-:--:--"
+        h, r = divmod(float(self), 3600)
+        m, s = divmod(r, 60)
+        return f"{int(h):02d}:{int(m):02d}:{s:06.3f}"
+
+    def __repr__(self) -> str:
+        """Return detailed string representation showing both native and SI values.
+
+        Returns:
+            str: Value in native scale with SI equivalent (e.g., "90 ° (= 1.5708 SI)").
+        """
+        return f"{str(self)} (= {float(self):g} {self.ROOT.SYMBOL})"
+
+
+Time = Second | Minute | Hour | ClockTime  # Type alias for any time unit

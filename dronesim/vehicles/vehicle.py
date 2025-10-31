@@ -250,11 +250,11 @@ class Vehicle(ABC):
             NotImplementedError: If the state machine has not been initialized.
             ValueError: If the transition is not allowed by the state machine rules.
         """
-        if not type(self)._state_machine:
+        if not self._state_machine:
             msg = "Subclasses must initialize the state_machine"
             raise NotImplementedError(msg)
 
-        return type(self)._state_machine.request_transition(next_state, *args, **kwargs)
+        return self._state_machine.request_transition(next_state, *args, **kwargs)
 
     @property
     def current_state(self) -> State:
@@ -475,3 +475,15 @@ class Vehicle(ABC):
         new_timer = Timer(duration)
         self._timers.append(new_timer)
         return new_timer
+
+    def state_list(self) -> list[State]:
+        """Get a list of all states defined in the drone's state machine.
+
+        Returns:
+            A list of all states that have defined transitions in the drone's state machine.
+        """
+        if not hasattr(self, "_state_machine"):
+            msg = "Subclasses must initialize the state_machine ClassVar."
+            raise NotImplementedError(msg)
+
+        return self._state_machine.get_state_list()

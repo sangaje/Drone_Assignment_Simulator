@@ -82,7 +82,7 @@ from .unit_base import Unit
 from .unit_distance import Kilometer, Length, Meter
 from .unit_float import UnitFloat
 from .unit_power import Kilowatt, Power, Watt
-from .unit_time import Hour, Minute, Second, Time
+from .unit_time import ClockTime, Hour, Minute, Second, Time
 from .unit_velocity import (
     KilometersPerHour,
     KilometersPerSecond,
@@ -108,6 +108,7 @@ __all__ = [
     "Second",
     "Minute",
     "Hour",
+    "ClockTime",
     "Time",
     # Velocity units
     "MeterPerSecond",

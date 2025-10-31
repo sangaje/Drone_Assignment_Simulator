@@ -53,8 +53,13 @@ from collections import deque
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
 import csv
+from enum import Enum
 from typing import Protocol, Self, runtime_checkable
 
+import numpy as np
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
@@ -64,13 +69,140 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.table import Table
+from rich.text import Text
 
 from dronesim.mission import Task
+from dronesim.state.state_machine import State
 from dronesim.unit import Second, Time
+from dronesim.unit.unit_time import ClockTime
 from dronesim.vehicles import Vehicle
 
 ONE_SECOND = Second(1)
+CONSOLE = Console()
 
+def analyze_task_processing_times(task_data_list, title="Task Processing Time Analysis"):
+    """Analyze task processing times and create visualization from raw data.
+    
+    Args:
+        task_data_list: List of dictionaries with keys:
+                       - 'start_time': datetime or float (seconds from base time)
+                       - 'processing_time': float (processing time in seconds)
+                       OR list of tuples (start_time, processing_time)
+        title: Title for the analysis plot
+    
+    Returns:
+        pandas.DataFrame: Filtered statistics for further analysis
+    """
+    from datetime import datetime, timedelta
+
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    print("=== Task Processing Time Analysis ===")
+    print(f"Input data points: {len(task_data_list)}")
+
+    if not task_data_list:
+        print("No data provided.")
+        return None
+
+    # Normalize input data
+    processed_data = []
+    base_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    for item in task_data_list:
+        if isinstance(item, dict):
+            # Dictionary format
+            start_time = item.get('start_time')
+            processing_time = item.get('processing_time')
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            # Tuple/list format
+            start_time, processing_time = item[0], item[1]
+        else:
+            continue
+
+        # Convert start_time to datetime if it's a number
+        if isinstance(start_time, (int, float)):
+            start_datetime = base_time + timedelta(seconds=start_time)
+        elif isinstance(start_time, datetime):
+            start_datetime = start_time
+        else:
+            continue
+
+        if processing_time is not None:
+            processed_data.append({
+                'start_time': start_datetime,
+                'processing_time': processing_time
+            })
+
+    print(f"Valid data points for analysis: {len(processed_data)}")
+
+    if not processed_data:
+        print("No valid data found.")
+        return None
+
+    # Create DataFrame
+    df = pd.DataFrame(processed_data)
+    df = df.set_index('start_time').sort_index()
+
+    # 10-minute resampling
+    stats = df.resample("10min")["processing_time"].agg(['mean', 'min', 'max', 'count'])
+    stats_filtered = stats[stats['count'] > 0]
+
+    if len(stats_filtered) == 0:
+        print("No data after filtering.")
+        return None
+
+    # Create plot
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    ax_twin = ax.twinx()
+
+    time_axis = stats_filtered.index
+
+    # Convert seconds to minutes for better readability
+    stats_filtered_min = stats_filtered.copy()
+    stats_filtered_min['min'] = stats_filtered_min['min'] / 60
+    stats_filtered_min['max'] = stats_filtered_min['max'] / 60
+    stats_filtered_min['mean'] = stats_filtered_min['mean'] / 60
+
+    # Plot min-max range and average
+    ax.fill_between(time_axis, stats_filtered_min['min'], stats_filtered_min['max'],
+                   alpha=0.2, color='green', label='Min-Max Range')
+    ax.plot(time_axis, stats_filtered_min['mean'], 'g-', linewidth=2, label='Average Processing Time')
+
+    # Plot task count
+    ax_twin.bar(time_axis, stats_filtered['count'],
+               alpha=0.6, color='orange', width=timedelta(minutes=8),
+               label='Task Count')
+
+    # Set labels and title
+    ax.set_title(f'{title} (10-min intervals)', fontsize=14)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Processing Time (minutes)', fontsize=12)
+    ax_twin.set_ylabel('Task Count', fontsize=12)
+
+    # Add legends and grid
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper left')
+    ax_twin.legend(loc='upper right')
+
+    # Format time axis
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+
+    plt.tight_layout()
+    plt.xticks(rotation=45)
+    plt.show()
+
+    # Print summary statistics
+    print("\n=== Summary Statistics ===")
+    print(f"Time periods: {len(stats_filtered)}")
+    print(f"Average processing time: {stats_filtered['mean'].mean() / 60:.1f} minutes")
+    print(f"Peak task count: {stats_filtered['count'].max()} tasks")
+    print(f"Average tasks per period: {stats_filtered['count'].mean():.1f} tasks")
+
+    return stats_filtered
 
 @runtime_checkable
 class _SupportsRichComparisonT(Protocol):
@@ -197,6 +329,11 @@ class Simulator[V: Vehicle, T: Task](ABC):
     _completed_tasks_queue: deque[T]
     _executor: ThreadPoolExecutor
 
+    _temp_task_texts: dict[State, Text]
+    _temp_vehicle_texts: dict[State, Text]
+    _task_time_mean: Text
+    _task_time_std: Text
+
     def __init__(self):
         """Initialize a new Simulator instance.
 
@@ -248,6 +385,7 @@ class Simulator[V: Vehicle, T: Task](ABC):
             next(reader)  # 헤더 건너뛰기
             temp_tasks_list: list[T] = []
             for row in reader:
+                row = [cell.strip() for cell in row]
                 task = self.make_task(columns, row)
                 progress.advance(p)
                 if task is not None:
@@ -335,10 +473,12 @@ class Simulator[V: Vehicle, T: Task](ABC):
             TaskProgressColumn(),  # 예: 123/1000 • 12.3%
             TimeElapsedColumn(),
             TimeRemainingColumn(),
+            console=CONSOLE,
+            auto_refresh=True
         ) as progress:
-            self._init_sim(progress, dataset_path, key, j)
+            panel = self._init_sim(progress, dataset_path, key, j)
             try:
-                self._sim_loop(progress, batch_size, dt, key)
+                self._sim_loop(progress, batch_size, dt, key, panel)
             except Exception:
                 self._shutdown_executor(hard_shutdown=True)
                 raise
@@ -351,10 +491,12 @@ class Simulator[V: Vehicle, T: Task](ABC):
         dataset_path: str,
         key: Callable[[T], _SupportsRichComparisonT] | None,
         j: int = 1,
-    ):
+    ) -> Panel:
         init_msg = "[green]Initializing Simulation..."
-        p = progress.add_task(init_msg, total=3)
+        p = progress.add_task(init_msg, total=4)
         self._init_queues()
+        self._temp_task_texts = {}
+        self._temp_vehicle_texts = {}
         self._init_data(progress, dataset_path, key)
         progress.advance(p)
         self._init_vehicles(progress)
@@ -362,20 +504,50 @@ class Simulator[V: Vehicle, T: Task](ABC):
         self._init_thread_pool_executor(progress, j)
         progress.advance(p)
 
+        tasks_states : list[Enum] = self._tasks_queue[0].state_list()
+        vehicles_states : list[Enum] = self._vehicles[0].state_list()
+        self._task_time_mean = Text("None")
+        self._task_time_std = Text("None")
+
+        t = Table.grid(padding=(0, 2))
+        for state in tasks_states:
+            self._temp_task_texts[state] = Text("0")
+            t.add_row(f"[b]Task - {state.name}[/b]: ", self._temp_task_texts[state])
+
+        for state in vehicles_states:
+            self._temp_vehicle_texts[state] = Text("0")
+            t.add_row(f"[b]Vehicle - {state.name}[/b]: ", self._temp_vehicle_texts[state])
+
+        t.add_section()
+        t.add_row("[b]Average Task Time[/b]: ", self._task_time_mean)
+        t.add_row("[b]Task Time Standard Deviation[/b]: ", self._task_time_std)
+
+        progress.advance(p)
+
+
+        return Panel(t, title="Current States", padding=(1, 2))
+
     def _sim_loop(
         self,
         progress: Progress,
         batch_size: int,
         dt: Time,
         key: Callable[[T], _SupportsRichComparisonT] | None,
+        panel: Panel = None,
     ):
-        step = 0
+        now = ClockTime(0)
+        t = progress.add_task("", total = None)
         tasks_count = len(self._tasks_queue)
-        t_waiting = progress.add_task("[green]Waiting Tasks...", total=tasks_count)
-        t_working = progress.add_task("[green]Working Tasks...", total=tasks_count)
-        t_completed = progress.add_task("[green]Completed Tasks...", total=tasks_count)
+        self._progress = progress
+        self._t_waiting = progress.add_task("[green]Pending Tasks...", total=tasks_count)
+        self._t_working = progress.add_task("[green]Working Tasks...", total=tasks_count)
+        self._t_completed = progress.add_task("[green]Completed Tasks...", total=tasks_count)
 
         def execute_parallel(fn: Callable, batch_size: int, *args):
+            if self._executor._max_workers == 1:
+                for i in range(0, len(self._vehicles), batch_size):
+                    fn(i, min(i + batch_size, len(self._vehicles)), *args)
+                return
             futures = [
                 self._executor.submit(fn, i, min(i + batch_size, len(self._vehicles)), *args)
                 for i in range(0, len(self._vehicles), batch_size)
@@ -385,29 +557,45 @@ class Simulator[V: Vehicle, T: Task](ABC):
                 future.result()
 
         def do_update(start: int, end: int, dt: Time, now: Time):
-            for i in range(start, end):
-                self._vehicles[i].update(dt, now)
+            try:
+                for i in range(start, end):
+                    self._vehicles[i].update(dt, now)
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_vehicle_update(start: int, end: int, dt: Time, now: Time):
-            for i in range(start, end):
-                self._vehicles[i].vehicle_update(dt, now)
+            try:
+                for i in range(start, end):
+                    self._vehicles[i].vehicle_update(dt, now)
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
+
+        def do_refresh_timer(start: int, end: int, dt: Time, now: Time):
+            try:
+                for i in range(start, end):
+                    self._vehicles[i].timer_update(dt)
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_post_update(start: int, end: int, dt: Time, now: Time):
-            for i in range(start, end):
-                self._vehicles[i].post_update(dt, now)
+            try:
+                for i in range(start, end):
+                    self._vehicles[i].post_update(dt, now)
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_task_update():
             if key is None:
                 while len(self._tasks_queue) > 0:
                     task = self._tasks_queue.popleft()
-                    progress.advance(t_waiting)
                     self._pending_tasks_queue.append(task)
+                    progress.advance(self.self._t_waiting)
             else:
                 while len(self._tasks_queue) > 0 and key(self._tasks_queue[0]) <= now:
                     task = self._tasks_queue.popleft()
                     task.start_at = now
-                    progress.advance(t_waiting)
                     self._pending_tasks_queue.append(task)
+                    progress.advance(self._t_waiting)
 
             # TODO How to improve efficiency?
             for i in range(len(self._working_tasks_queue)):
@@ -418,18 +606,81 @@ class Simulator[V: Vehicle, T: Task](ABC):
             while len(self._working_tasks_queue) > 0 and self._working_tasks_queue[0].done:
                 task = self._working_tasks_queue.popleft()
                 self._completed_tasks_queue.append(task)
-                progress.advance(t_working)
-                progress.advance(t_completed)
+                progress.advance(self._t_completed)
 
-        while not self.done:
-            now = step * dt
-            execute_parallel(do_update, batch_size, dt, now)
-            execute_parallel(do_vehicle_update, batch_size, dt, now)
-            self.sim_update(dt, now)
-            execute_parallel(do_post_update, batch_size, dt, now)
-            self.sim_post_update(dt, now)
-            do_task_update()
-            step += 1
+        def refresh_state_counts():
+            # Update task state counts
+            task_state_counts = dict.fromkeys(self._temp_task_texts.keys(), 0)
+            for task in (
+                list(self._pending_tasks_queue)
+                + list(self._working_tasks_queue)
+                + list(self._completed_tasks_queue)
+            ):
+                task_state_counts[task.current_state] += 1
+            for state, text in self._temp_task_texts.items():
+                text.plain = str(task_state_counts[state])
+
+            # Update vehicle state counts
+            vehicle_state_counts = dict.fromkeys(self._temp_vehicle_texts.keys(), 0)
+
+
+
+            for vehicle in self._vehicles:
+                vehicle_state_counts[vehicle.current_state] += 1
+            for state, text in self._temp_vehicle_texts.items():
+                text.plain = str(vehicle_state_counts[state])
+
+            if len(self._completed_tasks_queue) == 0:
+                self._task_time_mean.plain = "--:--:--"
+                self._task_time_std.plain = "--:--:--"
+                return
+
+            start_times = np.asarray([float(task.start_at) for task in self._completed_tasks_queue])
+            end_times = np.asarray([float(task.completed_at) for task in self._completed_tasks_queue])
+
+            d_times = end_times - start_times
+
+
+            mean = ClockTime(np.mean(d_times))
+            std = ClockTime(np.std(d_times))
+
+            self._task_time_mean.plain = str(mean)
+            self._task_time_std.plain = str(std)
+
+
+
+        with Live(panel, console=CONSOLE, auto_refresh=True) as _:
+            while not self.done:
+                execute_parallel(do_update, batch_size, dt, now)
+                execute_parallel(do_refresh_timer, batch_size, dt, now)
+                execute_parallel(do_vehicle_update, batch_size, dt, now)
+                self.sim_update(dt, now)
+                execute_parallel(do_post_update, batch_size, dt, now)
+                self.sim_post_update(dt, now)
+                do_task_update()
+                progress.update(t, description=f"[green]Simulation Time: {now}")
+                refresh_state_counts()
+                now += dt
+
+    def get_pending_tasks(self) -> Iterator[T]:
+        """Get a list of all pending tasks in the simulation.
+
+        Returns:
+            Sequence[T]: A sequence of pending tasks currently in the simulation.
+        """
+        while len(self._pending_tasks_queue) > 0:
+            self._progress.advance(self._t_working)
+            task = self._pending_tasks_queue.popleft()
+            self._working_tasks_queue.append(task)
+            yield task
+
+    def get_vehicles(self) -> Sequence[V]:
+        """Get a list of all vehicles in the simulation.
+
+        Returns:
+            Sequence[V]: A sequence of vehicles currently in the simulation.
+        """
+        return self._vehicles
 
     @abstractmethod
     def make_task(self, columns: list[str], row: list[str]) -> T | None:
@@ -465,7 +716,7 @@ class Simulator[V: Vehicle, T: Task](ABC):
         pass
 
     @abstractmethod
-    def make_vehicle(self) -> Iterator[V | Sequence[V]]:
+    def make_vehicle(self) -> Iterator[V | Sequence[V]] | None:
         """Generate vehicle instances for the simulation fleet.
 
         This abstract method must be implemented by subclasses to create and
@@ -484,6 +735,7 @@ class Simulator[V: Vehicle, T: Task](ABC):
                 The simulator will handle both cases automatically, adding
                 individual vehicles directly and extending the fleet with
                 sequences of vehicles.
+            None: There are no any vehicles to create.
 
         Example:
             >>> def make_vehicle(self):
@@ -501,8 +753,8 @@ class Simulator[V: Vehicle, T: Task](ABC):
         """
         pass
 
-    @abstractmethod
-    def results(self):
+    @property
+    def results(self) -> tuple[list[T], list[V]]:
         """Generate final simulation results and performance metrics.
 
         This abstract method must be implemented by subclasses to collect,
@@ -533,8 +785,9 @@ class Simulator[V: Vehicle, T: Task](ABC):
             ...         "failed_tasks": len([t for t in self._tasks if t.failed]),
             ...         "simulation_duration": self._total_simulation_time,
             ...     }
+ 
         """
-        pass
+        return self._completed_tasks_queue, self._vehicles
 
     @abstractmethod
     def sim_update(self, dt: Time, now: Time):

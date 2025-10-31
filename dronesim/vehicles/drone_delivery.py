@@ -105,8 +105,10 @@ Usage Examples:
         >>> # and task states, selecting nearest pickup/dropoff locations first
 """
 
+from dronesim.geo import GeoPoint
 from dronesim.mission import DeliveryState, DeliveryTask
-from dronesim.unit import Time
+from dronesim.unit import Length, Time
+from dronesim.unit.unit_distance import Kilometer
 
 from .drone import Drone
 
@@ -341,15 +343,17 @@ class DeliveryDrone(Drone[DeliveryTask]):
             intervention. The method integrates seamlessly with both the drone state
             machine and delivery task workflow management systems.
         """
-        if self.current_tasks is None and len(self.task_queue) == 0:
+        if not self.current_tasks and len(self.task_queue) == 0:
             return
-        if self.current_tasks is None:
+        if not self.current_tasks:
             self.current_tasks = list(self.task_queue)
             self.task_queue.clear()
 
         # Find the task with the minimum state
-        min_state = min(self.current_tasks, key=lambda t: t.current_state)
-        todo_task_list = [task for task in self.current_tasks if task.current_state == min_state]
+        min_state = min(self.current_tasks, key=lambda t: t.current_state).current_state
+        todo_task_list = [
+            task for task in self.current_tasks if task.current_state == min_state
+        ]
 
         # Assign destination based on the minimum state task
         if min_state == DeliveryState.ASSIGNED:
@@ -369,6 +373,41 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._current_mission = min_distance_task
         self._current_mission.next(now)
         self._start_flight(now)
+
+    @property
+    def route_remainder(self) -> tuple[Length, GeoPoint]:
+        pick_up_points: list[GeoPoint] = []
+        drop_off_points: list[GeoPoint] = []
+        if self.current_tasks is not None:
+            for task in self.current_tasks:
+                if task.current_state < DeliveryState.SERVICE_PICKUP:
+                    pick_up_points.append(task.origin)
+
+                if task.current_state < DeliveryState.SERVICE_DROPOFF:
+                    drop_off_points.append(task.destination)
+
+        else:
+            if len(self.task_queue) == 0:
+                return Kilometer(0), self.position
+
+        for task in self.task_queue:
+            pick_up_points.append(task.origin)
+            drop_off_points.append(task.destination)
+
+        pick_up_points.sort(key=lambda t: self.position.distance_to(t))
+
+        if len(pick_up_points) > 0:
+            drop_off_points.sort(key=lambda t: pick_up_points[-1].distance_to(t))
+        else:
+            drop_off_points.sort(key=lambda t: self.position.distance_to(t))
+
+        route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
+        total_distance: Length = Kilometer(0)
+
+        for point in route:
+            total_distance += self.position.distance_to(point)
+
+        return total_distance, route[-1]
 
     def on_grounded(self, dt: Time, now: Time) -> None:
         """Execute delivery-specific ground operations with timing-based service coordination.
@@ -645,6 +684,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
         if self._current_mission is not None:
             self._current_mission.next(now)
 
+            if self._current_mission.current_state == DeliveryState.SERVICE_DROPOFF:
+                self._current_mission.next(now)
+
             if self._current_mission.current_state == DeliveryState.DONE:
                 self.current_tasks.remove(self._current_mission)
                 self._current_mission = None
+
+    def post_update(self, dt, now):
+        return

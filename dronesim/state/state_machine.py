@@ -100,7 +100,7 @@ class StateMachine:
                        is not allowed by the state machine rules.
         """
         next_action = self._validate_transition(self.current, next_state)
-        self.state = next_action.state
+        self._state = next_action.state
         return next_action(*args, **kwargs)
 
     @property
@@ -136,3 +136,11 @@ class StateMachine:
 
         msg = f"Illegal transition {frm.name} → {to.name}"
         raise ValueError(msg)
+
+    def get_state_list(self) -> list[State]:
+        """Get a list of all states defined in the state machine.
+
+        Returns:
+            A list of all states that have defined transitions in the state machine.
+        """
+        return list(self._allowed.keys())

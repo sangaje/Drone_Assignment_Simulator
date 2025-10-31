@@ -285,7 +285,7 @@ class Drone[T: Task](Vehicle):
         power_vtol: Power = DEFAULT_CONSUMPTION,
         power_transit: Power = DEFAULT_CONSUMPTION,
         operational_battery_percentage: float = DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE,
-        base_pos: dict[GeoPoint] | None = None,
+        base_pos: dict[int, GeoPoint] | None = None,
         max_task_queue_size: int = 0,
     ):
         """Initialize a new Drone instance with operational parameters.
@@ -342,7 +342,7 @@ class Drone[T: Task](Vehicle):
 
         if not base_pos:
             copy_pos = pos.copy()
-            base_pos = {copy_pos.id: copy_pos}
+            base_pos = {id(copy_pos): copy_pos}
         self.base_pos = base_pos
         self._task_queue = deque()
         self._tasks_current = None
@@ -466,7 +466,7 @@ class Drone[T: Task](Vehicle):
 
         # Check if the path to the next position passes through the target
         if next_position.passed_through_target(
-            start=self.position,
+            start_point=self.position,
             target=self._current_destination,
         ):
             self.position = self._current_destination
@@ -839,7 +839,7 @@ class Drone[T: Task](Vehicle):
         """
         pass
 
-    def update(self, dt: Time) -> None:
+    def update(self, dt: Time, now: Time) -> None:
         """Execute delivery-specific update logic for one simulation step.
 
         Handles delivery-oriented behaviors including package transportation,
