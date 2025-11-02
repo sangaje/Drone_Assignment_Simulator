@@ -425,6 +425,18 @@ class Vehicle(ABC):
         """
         pass
 
+
+    @property
+    @abstractmethod
+    def is_busy(self) -> bool:
+        """Indicate whether the vehicle is currently engaged in a task.
+
+        Returns:
+            bool: True if the vehicle is actively executing a task,
+                  False if it is idle or available for new assignments.
+        """
+        pass
+
     def timer_update(self, dt: Time) -> None:
         """Update all active timers and remove completed ones.
 
@@ -487,3 +499,7 @@ class Vehicle(ABC):
             raise NotImplementedError(msg)
 
         return self._state_machine.get_state_list()
+
+    @abstractmethod
+    def is_operational(self) -> bool:
+        pass

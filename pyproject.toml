@@ -7,14 +7,18 @@ dependencies = [
   "simpy>=4.1.1",
   "pint>=0.25",
   "pyproj>=3.7.2",
-  "numpy>=2.3.4",
+  "numpy<2",
   "rich>=14.2.0",
   # "ipywidgets>=8.1.7",
   "tqdm>=4.67.1",
   "pandas>=2.3.3",
   "matplotlib>=3.10.7",
+  "scikit-learn>=1.7.2",
+  "scikit-learn-extra>=0.3.0",
+  "ipywidgets>=8.1.7",
+  "scipy>=1.16.3",
 ]
-requires-python = "==3.12.*"
+requires-python = "==3.11.*"
 readme = "README.md"
 license = { text = "MIT" }
 

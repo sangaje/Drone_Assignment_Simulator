@@ -78,6 +78,7 @@ Performance Characteristics:
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Generic, TypeVar
 
 from dronesim.energy import BatteryStatus, WattSecond
 from dronesim.geo import GeoPoint
@@ -93,6 +94,7 @@ DEFAULT_TRANSITION_DURATION = Minute(1.0)
 DEFAULT_CONSUMPTION = Watt(0.0)
 DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = 20.0  # Minimum battery percentage to be operational
 
+T = TypeVar('T', bound=Task)
 
 class DroneState(Enum):
     """Enumeration of possible drone operational states.
@@ -152,7 +154,7 @@ class PowerConsumption:
 
 
 @dataclass(frozen=True)
-class DroneStatus[T: Task]:
+class DroneStatus(Generic[T]):
     """Immutable snapshot of drone operational state and configuration.
 
     This generic frozen dataclass provides a comprehensive view of a drone's current
@@ -187,7 +189,7 @@ class DroneStatus[T: Task]:
     task_queue: deque[T]
 
 
-class Drone[T: Task](Vehicle):
+class Drone(Vehicle, Generic[T]):
     """Generic autonomous drone with state machine-driven behavior and extensible methods.
 
     A state machine-controlled quadcopter that extends Vehicle with comprehensive
@@ -257,7 +259,7 @@ class Drone[T: Task](Vehicle):
 
     battery: BatteryStatus
     operational_battery_percentage: float
-    base_pos: dict[GeoPoint]
+    base_pos: dict[int: GeoPoint]
 
     velocity: Velocity
     transition_duration: Time
@@ -871,3 +873,12 @@ class Drone[T: Task](Vehicle):
             dt (Time): Fixed time step duration for this update cycle.
         """
         pass
+
+    @property
+    def is_busy(self) -> bool:
+        """Check if the drone is currently in use (has active tasks).
+
+        Returns:
+            bool: True if the drone has current tasks assigned, False otherwise.
+        """
+        return (self._tasks_current and len(self._tasks_current) > 0) or len(self.task_queue) > 0
