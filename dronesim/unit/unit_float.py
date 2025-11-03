@@ -348,7 +348,7 @@ class UnitFloat(float, Unit):
         Returns:
             str: Value and symbol in the unit's natural scale (e.g., "90.0 °").
         """
-        return f"{self.to(type(self))} {type(self).SYMBOL}".strip()
+        return f"{self.to(type(self)):.6g} {type(self).SYMBOL}".strip()
 
     def __repr__(self) -> str:
         """Return detailed string representation showing both native and SI values.

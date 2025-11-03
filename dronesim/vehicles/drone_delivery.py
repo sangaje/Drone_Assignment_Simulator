@@ -106,6 +106,7 @@ Usage Examples:
 """
 
 from dronesim.energy import BatteryStatus
+from dronesim.energy.unit import Energy
 from dronesim.geo import GeoPoint
 from dronesim.mission import DeliveryState, DeliveryTask
 from dronesim.unit import KilometersPerHour, Length, Minute, Power, Time, Velocity, Watt
@@ -245,6 +246,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
     _deliveries_per_charge: int
     _deliveries_count: int
     _is_going_to_base: bool
+    _is_on_base: bool
+    _start_travel_time: Time | None
+    battery_usage_history: list[tuple[Time, Time, Energy]]
 
     def __init__(
         self,
@@ -275,6 +279,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._deliveries_per_charge = deliveries_per_charge
         self._deliveries_count = 0
         self._is_going_to_base = False
+        self._is_on_base = True
+        self._start_travel_time = None
+        self.battery_usage_history = []
 
     def _try_assign_new_destination(self, now: Time) -> None:
         """Execute intelligent destination assignment using state-aware route optimization.
@@ -382,14 +389,22 @@ class DeliveryDrone(Drone[DeliveryTask]):
             intervention. The method integrates seamlessly with both the drone state
             machine and delivery task workflow management systems.
         """
-        if not self.current_tasks and len(self.task_queue) == 0:
-            if not self.is_operational():
+        if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
+            if self._start_travel_time is None and self._is_on_base:
+                self.battery.replace_battery()
+
+            if not self.is_operational() or not self._is_on_base:
                 k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
                 self.current_destination = v
                 self._is_going_to_base = True
                 self._start_flight(now)
             return
-        if not self.current_tasks:
+
+        if self._start_travel_time is None:
+            self._is_on_base = False
+            self._start_travel_time = now
+
+        if  len(self.current_tasks) == 0:
             self.current_tasks = list(self.task_queue)
             self._deliveries_count += len(self.current_tasks)
             self.task_queue.clear()
@@ -422,7 +437,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
     def route_remainder(self, new_task: DeliveryTask |None = None) -> tuple[Length, GeoPoint]:
         pick_up_points: list[GeoPoint] = []
         drop_off_points: list[GeoPoint] = []
-        if self.current_tasks is not None:
+        if len(self.current_tasks) > 0:
             for task in self.current_tasks:
                 if task.current_state < DeliveryState.SERVICE_PICKUP:
                     pick_up_points.append(task.origin)
@@ -608,6 +623,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 return
 
             self._try_assign_new_destination(now)
+
             return
 
     def enter_grounded(self, now: Time) -> None:
@@ -743,11 +759,16 @@ class DeliveryDrone(Drone[DeliveryTask]):
             • State machine integration ensures valid state transitions
             • Task list operations maintain queue integrity even with rapid completions
         """
-        super().enter_grounded(now)
-
         if self._is_going_to_base:
             self._is_going_to_base = False
             self._deliveries_count = 0
+            self._is_on_base = True
+            battery_useage = self.battery.capacity - self.battery.current
+            self.battery_usage_history.append((self._start_travel_time, now, battery_useage))
+            self._start_travel_time = None
+
+        super().enter_grounded(now)
+
 
         if self._current_mission is not None:
             self._current_mission.next(now)
@@ -759,14 +780,14 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self.current_tasks.remove(self._current_mission)
                 self._current_mission = None
 
-    def is_operational(self) -> bool:
-        c1 = super().is_operational()
-        c2 = (self._deliveries_count + len(self.task_queue)) < self._deliveries_per_charge
-        return c1 and c2
+    def can_accept_task(self) -> bool:
+        return (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+
+    def assign(self, task):
+        if self.can_accept_task():
+            return super().assign(task)
+        return False
 
     @property
     def is_busy(self) -> bool:
         return super().is_busy or self._is_going_to_base
-
-    def post_update(self, dt, now):
-        return

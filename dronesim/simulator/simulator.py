@@ -84,6 +84,7 @@ V = TypeVar("V", bound=Vehicle)
 T = TypeVar("T", bound=Task)
 
 
+
 def analyze_task_processing_times(
     task_data_list, title="Task Processing Time Analysis"
 ):
@@ -387,6 +388,144 @@ def analyze_task_processing_speed(
     # print(f"Average tasks per period: {stats_filtered['n'].mean():.1f} tasks")
 
     return stats_filtered
+
+
+def analyze_vehicle_battery_consumption(
+    vehicle_data_list, title="Vehicle Battery Consumption Analysis"
+):
+    """Analyze battery consumption per vehicle and create visualization from raw data.
+
+    Args:
+        vehicle_data_list: List of dictionaries with keys:
+                          - 'start_time': datetime or float (seconds from base time)
+                          - 'battery_used': float (Ws - Watt Seconds consumed by vehicle)
+                          OR list of tuples (start_time, battery_used)
+        title: Title for the analysis plot
+
+    Returns:
+        pandas.DataFrame: 30-min binned stats (Wh-based μ/σ) filtered by n>0
+    """
+    from datetime import datetime, timedelta
+
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    print("=== Vehicle Battery Consumption Analysis ===")
+    print(f"Input data points: {len(vehicle_data_list)}")
+
+    if not vehicle_data_list:
+        print("No data provided.")
+        return None
+
+    # ---------------------------
+    # Normalize input data
+    # ---------------------------
+    processed_data = []
+    base_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    for item in vehicle_data_list:
+        if isinstance(item, dict):
+            start_time = item.get("start_time")
+            battery_used = item.get("battery_used")
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            start_time, battery_used = item[0], item[1]
+        else:
+            continue
+
+        if isinstance(start_time, (int, float)):
+            start_datetime = base_time + timedelta(seconds=start_time)
+        elif isinstance(start_time, datetime):
+            start_datetime = start_time
+        else:
+            continue
+
+        if battery_used is not None and battery_used >= 0:
+            # Ws → Wh
+            battery_used_wh = battery_used / 3600.0
+            processed_data.append({"start_time": start_datetime, "battery_used": battery_used_wh})
+
+    print(f"Valid data points for analysis: {len(processed_data)}")
+    if not processed_data:
+        print("No valid data found.")
+        return None
+
+    # ---------------------------
+    # DataFrame & resample(30min)
+    # ---------------------------
+    df = pd.DataFrame(processed_data).set_index("start_time").sort_index()
+
+    stats = df.resample("30min").agg(
+        mu=("battery_used", "mean"),
+        sigma=("battery_used", "std"),   # ddof=1
+        n=("battery_used", "count"),
+    )
+
+    # μ ± σ / μ ± 2σ (계산 유지: 리턴 포맷 호환)
+    stats["lo_1sigma"] = stats["mu"] - stats["sigma"]
+    stats["hi_1sigma"] = stats["mu"] + stats["sigma"]
+    stats["lo_2sigma"] = stats["mu"] - 2 * stats["sigma"]
+    stats["hi_2sigma"] = stats["mu"] + 2 * stats["sigma"]
+
+    stats_filtered = stats.loc[stats["n"] > 0].copy()
+    if len(stats_filtered) == 0:
+        print("No data after filtering.")
+        return None
+
+    # ---------------------------
+    # Plot: Battery consumption boxplot by time periods
+    # ---------------------------
+    # 원본 데이터를 30분 구간별로 그룹화하여 boxplot 생성
+    df_plot = df.copy()
+    df_plot["time_period"] = df_plot.index.floor("30min")
+
+    # 각 시간 구간별 배터리 소모량 데이터 수집
+    time_periods = sorted(df_plot["time_period"].unique())
+    battery_data = []
+    period_labels = []
+
+    for period in time_periods:
+        period_consumption = df_plot[df_plot["time_period"] == period]["battery_used"]
+        if len(period_consumption) > 0:  # 데이터가 있는 구간만
+            battery_data.append(period_consumption.values)
+            period_labels.append(period.strftime("%H:%M"))
+
+    if not battery_data:
+        print("No data available for plotting.")
+        return stats_filtered
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+
+    # Boxplot 생성
+    bp = ax.boxplot(battery_data, labels=period_labels, patch_artist=True,
+                    showmeans=True, meanline=True,
+                    boxprops=dict(facecolor='lightcoral', alpha=0.7),
+                    meanprops=dict(color='red', linewidth=2),
+                    medianprops=dict(color='darkred', linewidth=2),
+                    whiskerprops=dict(color='black'),
+                    capprops=dict(color='black'),
+                    flierprops=dict(marker='o', markerfacecolor='red', markersize=3, alpha=0.5))
+
+    # 제목/레이블
+    ax.set_title(f"{title} - Battery Consumption Distribution (30-min intervals)", fontsize=14)
+    ax.set_xlabel("Time Period", fontsize=12)
+    ax.set_ylabel("Battery Consumption (Wh)", fontsize=12)
+
+    # 격자 및 축 포맷
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # x축 레이블 회전 (너무 많으면)
+    if len(period_labels) > 8:
+        plt.xticks(rotation=45)
+
+    # 범례 추가 (평균선과 중앙값선 설명)
+    ax.plot([], [], color='red', linewidth=2, label='Mean')
+    ax.plot([], [], color='darkred', linewidth=2, label='Median')
+    ax.legend(loc='upper right')
+
+    plt.tight_layout()
+
+    return stats_filtered
+
 
 @runtime_checkable
 class _SupportsRichComparisonT(Protocol):
@@ -786,11 +925,11 @@ class Simulator(ABC, Generic[V, T]):
                 print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_vehicle_update(start: int, end: int, dt: Time, now: Time):
-            # try:
+            try:
                 for i in range(start, end):
                     self._vehicles[i].vehicle_update(dt, now)
-            # except Exception as e:
-            #     print(f"Error during vehicle update in range ({start}, {end}): {e}")
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_refresh_timer(start: int, end: int, dt: Time, now: Time):
             try:
@@ -894,7 +1033,7 @@ class Simulator(ABC, Generic[V, T]):
             while not self.done:
                 execute_parallel(do_update, batch_size, dt, now)
                 execute_parallel(do_refresh_timer, batch_size, dt, now)
-                execute_parallel(do_vehicle_update, batch_size, dt, now)
+                execute_parallel(do_vehicle_update, batch_size, dt, now) # recharge battery -> enter ground
                 self.sim_update(dt, now)
                 execute_parallel(do_post_update, batch_size, dt, now)
                 self.sim_post_update(dt, now)
