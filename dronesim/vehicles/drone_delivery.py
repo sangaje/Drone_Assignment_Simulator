@@ -390,9 +390,6 @@ class DeliveryDrone(Drone[DeliveryTask]):
             machine and delivery task workflow management systems.
         """
         if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
-            if self._start_travel_time is None and self._is_on_base:
-                self.battery.replace_battery()
-
             if not self.is_operational() or not self._is_on_base:
                 k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
                 self.current_destination = v
@@ -616,6 +613,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         super().on_grounded(dt, now)
 
+        if self._is_on_base:
+            self.battery.replace_battery()
+
         if self.current_destination is None:
             if self._current_mission in DeliveryTask.ground_task():
                 wait_for_pickup(self._current_mission)
@@ -781,7 +781,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self._current_mission = None
 
     def can_accept_task(self) -> bool:
-        return (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+        c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+        c2 = not self._is_going_to_base
+        return c1 and c2
 
     def assign(self, task):
         if self.can_accept_task():
