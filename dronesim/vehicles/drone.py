@@ -887,3 +887,5 @@ class Drone(Vehicle, Generic[T]):
             bool: True if the drone has current tasks assigned, False otherwise.
         """
         return (self._tasks_current and len(self._tasks_current) > 0) or len(self.task_queue) > 0
+
+

@@ -106,13 +106,13 @@ Usage Examples:
 """
 
 from dronesim.energy import BatteryStatus
-from dronesim.energy.unit import Energy
+from dronesim.energy.unit import Energy, WattHour
 from dronesim.geo import GeoPoint
 from dronesim.mission import DeliveryState, DeliveryTask
 from dronesim.unit import KilometersPerHour, Length, Minute, Power, Time, Velocity, Watt
 from dronesim.unit.unit_distance import Kilometer
 
-from .drone import Drone
+from .drone import Drone, DroneState
 
 DEFAULT_VELOCITY = KilometersPerHour(50.0)
 DEFAULT_TRANSITION_DURATION = Minute(1.0)
@@ -250,6 +250,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
     _is_going_to_base: bool
     _is_on_base: bool
     _start_travel_time: Time | None
+    _pakage_count: int
     battery_usage_history: list[tuple[Time, Time, Energy]]
 
     def __init__(
@@ -261,6 +262,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         power_idle: Power = DEFAULT_CONSUMPTION,
         power_vtol: Power = DEFAULT_CONSUMPTION,
         power_transit: Power = DEFAULT_CONSUMPTION,
+        power_per_pakage: Power = DEFAULT_CONSUMPTION,
         operational_battery_percentage: float = DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE,
         base_pos: dict[int, GeoPoint] | None = None,
         max_task_queue_size: int = 0,
@@ -284,8 +286,16 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._is_on_base = True
         self._start_travel_time = None
         self.battery_usage_history = []
+        self._pakage_count = 0
+        self.power_per_pakage = power_per_pakage
 
-    def _get_nearest_base(self, last_point: GeoPoint | None = None) -> GeoPoint:
+    def vehicle_update(self, dt, now):
+        if self.current_state != DroneState.GROUNDED:
+            consume_energy = WattHour.from_si(self._pakage_count * float(dt))*self.power_per_pakage
+            self.battery.consume_energy(consume_energy)
+        return super().vehicle_update(dt, now)
+
+    def get_nearest_base(self, last_point: GeoPoint | None = None) -> GeoPoint:
         if last_point is None:
             k, v = min(
                 self.base_pos.items(), key=lambda t: self.position.distance_to(t[1])
@@ -405,7 +415,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         """
         if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
             if not self.is_operational() or not self._is_on_base:
-                v = self._get_nearest_base()
+                v = self.get_nearest_base()
                 self.current_destination = v
                 self._is_going_to_base = True
                 self._start_flight(now)
@@ -447,7 +457,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def route_remainder(
         self, new_task: DeliveryTask | None = None
-    ) -> tuple[Length, GeoPoint]:
+    ) -> tuple[Length, Energy]:
         pick_up_points: list[GeoPoint] = []
         drop_off_points: list[GeoPoint] = []
         if len(self.current_tasks) > 0:
@@ -461,7 +471,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         else:
             if len(self.task_queue) == 0 and new_task is None:
                 return (
-                    self._get_nearest_base().distance_to(self.position),
+                    self.get_nearest_base().distance_to(self.position),
                     self.position,
                 )
 
@@ -496,7 +506,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
         route += new_pick_up_points + new_drop_off_points
-        route += [self._get_nearest_base(route[-1])]
+        route += [self.get_nearest_base(route[-1])]
 
         total_distance: Length = Kilometer(0)
 
@@ -507,8 +517,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
             else:
                 total_distance += prev_point.distance_to(point)
             prev_point = point
-
-        return total_distance, route[-1]
+        time = float(total_distance) / float(self.velocity)
+        total_energy = WattHour.from_si(float(self.power_transit) * time)
+        return total_distance, total_energy
 
     def on_grounded(self, dt: Time, now: Time) -> None:
         """Execute delivery-specific ground operations with timing-based service coordination.
@@ -631,10 +642,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
         def wait_for_pickup(current_mission: DeliveryTask):
             if current_mission.current_state is DeliveryState.SERVICE_PICKUP:
                 if current_mission.pickup_time <= now:
+                    self._pakage_count += 1
                     current_mission.next(now)
 
         def wait_for_dropoff(current_mission: DeliveryTask):
             if current_mission.current_state is DeliveryState.SERVICE_DROPOFF:
+                self._pakage_count -= 1
                 current_mission.next(now)
 
         super().on_grounded(dt, now)
@@ -829,6 +842,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
             return super().assign(task)
         return False
 
+    def is_operational(self):
+        return super().is_operational() and not self._is_going_to_base
+
     @property
     def is_busy(self) -> bool:
         return super().is_busy or self._is_going_to_base
+
+    def package_usage(self) -> int:
+        return len(self.current_tasks) + len(self.task_queue)
