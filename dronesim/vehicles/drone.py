@@ -268,7 +268,7 @@ class Drone(Vehicle, Generic[T]):
     power_vtol: Power
     power_transit: Power
 
-    _tasks_current: list[T] | None
+    _tasks_current: list[T]
     _task_queue: deque[T]
 
     _current_destination: GeoPoint | None
@@ -342,12 +342,13 @@ class Drone(Vehicle, Generic[T]):
         self.power_vtol = power_vtol
         self.power_transit = power_transit
 
+
         if not base_pos:
             copy_pos = pos.copy()
             base_pos = {id(copy_pos): copy_pos}
         self.base_pos = base_pos
         self._task_queue = deque()
-        self._tasks_current = None
+        self._tasks_current = []
         self._battery_usage = self.power_idle
         self._max_task_queue_size = max_task_queue_size
 
@@ -403,7 +404,7 @@ class Drone(Vehicle, Generic[T]):
         self._current_destination = destination
 
     @property
-    def current_tasks(self) -> list[T] | None:
+    def current_tasks(self) -> list[T]:
         """Get the current task assigned to the drone.
 
         Returns:
@@ -412,13 +413,13 @@ class Drone(Vehicle, Generic[T]):
         return self._tasks_current
 
     @current_tasks.setter
-    def current_tasks(self, task: T | None):
+    def current_tasks(self, tasks: list[T]):
         """Set the current task assigned to the drone.
 
         Args:
             task (T | None): The new task of type T or None to clear the current task.
         """
-        self._tasks_current = task
+        self._tasks_current = tasks
 
     @property
     def task_queue(self) -> deque[T]:
@@ -570,6 +571,9 @@ class Drone(Vehicle, Generic[T]):
                 self.update_sensor_data()        # Custom functionality
                 self.check_mission_status()      # Specialized behavior
         """
+        used_battery = WattSecond(float(self._battery_usage) * float(dt))
+        self.battery.consume_energy(used_battery)
+
         current_state = self.current_state
         if current_state in self._on_actions:
             self._on_actions[current_state](dt, now)
@@ -785,6 +789,7 @@ class Drone(Vehicle, Generic[T]):
                 self.analyze_landing_zone()     # Landing site verification
                 self.configure_descent_rate()   # Descent parameter setup
         """
+        self._battery_usage = self.power_vtol + self.power_idle
         self._vlot_timer = self.create_timer(self.transition_duration)
 
     def on_emergency(self, dt: Time, now: Time) -> None:
@@ -856,12 +861,12 @@ class Drone(Vehicle, Generic[T]):
             delivery-specific logic while maintaining the standard simulation
             update pattern.
         """
-        used_battery = WattSecond(float(self._battery_usage) * float(dt))
-        self.battery.consume_energy(used_battery)
+        pass
 
-    def fixed_update(
+    def post_update(
         self,
         dt: Time,
+        now: Time
     ) -> None:
         """Execute fixed-interval update logic for delivery drone.
 

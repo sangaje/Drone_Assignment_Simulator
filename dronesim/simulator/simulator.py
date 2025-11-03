@@ -84,310 +84,6 @@ V = TypeVar("V", bound=Vehicle)
 T = TypeVar("T", bound=Task)
 
 
-def analyze_task_processing_times(
-    task_data_list, title="Task Processing Time Analysis"
-):
-    """Analyze task processing times and create visualization from raw data.
-
-    Args:
-        task_data_list: List of dicts with keys:
-                        - 'start_time': datetime or float (seconds from base time)
-                        - 'processing_time': float (seconds)
-                        OR list of tuples (start_time, processing_time)
-        title: Title for the analysis plot
-
-    Returns:
-        pandas.DataFrame: 10-min binned stats (seconds-based μ/σ) filtered by n>0
-    """
-    from datetime import datetime, timedelta
-
-    import matplotlib.pyplot as plt
-    import pandas as pd
-
-    print("=== Task Processing Time Analysis ===")
-    print(f"Input data points: {len(task_data_list)}")
-
-    if not task_data_list:
-        print("No data provided.")
-        return None
-
-    # ---------------------------
-    # Normalize input data
-    # ---------------------------
-    processed_data = []
-    base_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    for item in task_data_list:
-        if isinstance(item, dict):
-            start_time = item.get("start_time")
-            processing_time = item.get("processing_time")
-        elif isinstance(item, (tuple, list)) and len(item) >= 2:
-            start_time, processing_time = item[0], item[1]
-        else:
-            continue
-
-        if isinstance(start_time, (int, float)):
-            start_datetime = base_time + timedelta(seconds=start_time)
-        elif isinstance(start_time, datetime):
-            start_datetime = start_time
-        else:
-            continue
-
-        if processing_time is not None:
-            processed_data.append(
-                {"start_time": start_datetime, "processing_time": processing_time}
-            )
-
-    print(f"Valid data points for analysis: {len(processed_data)}")
-    if not processed_data:
-        print("No valid data found.")
-        return None
-
-    # ---------------------------
-    # DataFrame & resample(30min)
-    # ---------------------------
-    df = pd.DataFrame(processed_data).set_index("start_time").sort_index()
-
-    stats = df.resample("30min").agg(
-        mu=("processing_time", "mean"),
-        sigma=("processing_time", "std"),   # ddof=1 (표본 표준편차)
-        n=("processing_time", "count"),
-    )
-
-    # μ ± σ / μ ± 2σ bands (초 단위)
-    stats["lo_1sigma"] = stats["mu"] - stats["sigma"]
-    stats["hi_1sigma"] = stats["mu"] + stats["sigma"]
-    stats["lo_2sigma"] = stats["mu"] - 2 * stats["sigma"]
-    stats["hi_2sigma"] = stats["mu"] + 2 * stats["sigma"]
-
-    # 유효 구간만 (n>0)
-    stats_filtered = stats.loc[stats["n"] > 0].copy()
-    if len(stats_filtered) == 0:
-        print("No data after filtering.")
-        return None
-
-    # ---------------------------
-    # Plot: Processing time boxplot by time periods
-    # ---------------------------
-    SEC2MIN = 1.0 / 60.0
-
-    # 원본 데이터를 30분 구간별로 그룹화하여 boxplot 생성
-    df_plot = df.copy()
-    df_plot["processing_time_min"] = df_plot["processing_time"] * SEC2MIN
-    df_plot["time_period"] = df_plot.index.floor("30min")
-
-    # 각 시간 구간별 처리 시간 데이터 수집
-    time_periods = sorted(df_plot["time_period"].unique())
-    processing_time_data = []
-    period_labels = []
-
-    for period in time_periods:
-        period_times = df_plot[df_plot["time_period"] == period]["processing_time_min"]
-        if len(period_times) > 0:  # 데이터가 있는 구간만
-            processing_time_data.append(period_times.values)
-            period_labels.append(period.strftime("%H:%M"))
-
-    if not processing_time_data:
-        print("No data available for plotting.")
-        return stats_filtered
-
-    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-
-    # Boxplot 생성
-    bp = ax.boxplot(processing_time_data, labels=period_labels, patch_artist=True,
-                    showmeans=True, meanline=True,
-                    boxprops=dict(facecolor='lightgreen', alpha=0.7),
-                    meanprops=dict(color='red', linewidth=2),
-                    medianprops=dict(color='darkgreen', linewidth=2),
-                    whiskerprops=dict(color='black'),
-                    capprops=dict(color='black'),
-                    flierprops=dict(marker='o', markerfacecolor='red', markersize=3, alpha=0.5))
-
-    # 제목/레이블
-    ax.set_title(f"{title} - Processing Time Distribution (30-min intervals)", fontsize=14)
-    ax.set_xlabel("Time Period", fontsize=12)
-    ax.set_ylabel("Processing Time (minutes)", fontsize=12)
-
-    # 격자 및 축 포맷
-    ax.grid(True, alpha=0.3, axis='y')
-
-    # x축 레이블 회전 (너무 많으면)
-    if len(period_labels) > 8:
-        plt.xticks(rotation=45)
-
-    # 범례 추가 (평균선과 중앙값선 설명)
-    ax.plot([], [], color='red', linewidth=2, label='Mean')
-    ax.plot([], [], color='darkgreen', linewidth=2, label='Median')
-    ax.legend(loc='upper right')
-
-    plt.tight_layout()
-
-    # # ---------------------------
-    # # Summary Statistics
-    # # ---------------------------
-    # print("\n=== Summary Statistics ===")
-    # print(f"Time periods analyzed: {len(stats_filtered)}")
-    # print(f"Total data points: {int(stats_filtered['n'].sum())} tasks")
-    # print(f"Overall average processing time: {(stats_filtered['mu'] * SEC2MIN).mean():.1f} minutes")
-    # print(f"Processing time standard deviation: {(stats_filtered['sigma'] * SEC2MIN).mean():.1f} minutes")
-    # print(f"Maximum period processing time: {(stats_filtered['mu'] * SEC2MIN).max():.1f} minutes")
-    # print(f"Minimum period processing time: {(stats_filtered['mu'] * SEC2MIN).min():.1f} minutes")
-    # print(f"Average tasks per period: {stats_filtered['n'].mean():.1f} tasks")
-
-    return stats_filtered
-
-
-def analyze_task_processing_speed(
-    task_data_list, title="Task Processing Speed Analysis"
-):
-    """Analyze task processing times and create visualization from raw data.
-
-    Args:
-        task_data_list: List of dictionaries with keys:
-                       - 'start_time': datetime or float (seconds from base time)
-                       - 'speed': float
-                       OR list of tuples (start_time, speed)
-        title: Title for the analysis plot
-
-    Returns:
-        pandas.DataFrame: Filtered statistics for further analysis
-    """
-    from datetime import datetime, timedelta
-
-    import matplotlib.pyplot as plt
-    import pandas as pd
-
-    print("=== Task Processing Time Analysis ===")
-    print(f"Input data points: {len(task_data_list)}")
-
-    if not task_data_list:
-        print("No data provided.")
-        return None
-
-    # ---------------------------
-    # Normalize input data
-    # ---------------------------
-    processed_data = []
-    base_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    for item in task_data_list:
-        if isinstance(item, dict):
-            start_time = item.get("start_time")
-            speed = item.get("speed")
-        elif isinstance(item, (tuple, list)) and len(item) >= 2:
-            start_time, speed = item[0], item[1]
-        else:
-            continue
-
-        if isinstance(start_time, (int, float)):
-            start_datetime = base_time + timedelta(seconds=start_time)
-        elif isinstance(start_time, datetime):
-            start_datetime = start_time
-        else:
-            continue
-
-        if speed is not None:
-            processed_data.append({"start_time": start_datetime, "speed": speed})
-
-    print(f"Valid data points for analysis: {len(processed_data)}")
-    if not processed_data:
-        print("No valid data found.")
-        return None
-
-    # ---------------------------
-    # DataFrame & resample(30min)
-    # ---------------------------
-    df = pd.DataFrame(processed_data).set_index("start_time").sort_index()
-
-    stats = df.resample("30min").agg(
-        mu=("speed", "mean"),
-        sigma=("speed", "std"),   # ddof=1 (표본 표준편차)
-        n=("speed", "count"),
-    )
-
-    # μ ± σ / μ ± 2σ bands
-    stats["lo_1sigma"] = stats["mu"] - stats["sigma"]
-    stats["hi_1sigma"] = stats["mu"] + stats["sigma"]
-    stats["lo_2sigma"] = stats["mu"] - 2 * stats["sigma"]
-    stats["hi_2sigma"] = stats["mu"] + 2 * stats["sigma"]
-
-    # 유효 구간만
-    stats_filtered = stats.loc[stats["n"] > 0].copy()
-    if len(stats_filtered) == 0:
-        print("No data after filtering.")
-        return None
-
-    # ---------------------------
-    # Plot: Speed boxplot by time periods
-    # ---------------------------
-    # NOTE: speed 단위가 m/s라면 3.6, 이미 km/h면 1.0
-    K = 3.6
-
-    # 원본 데이터를 30분 구간별로 그룹화하여 boxplot 생성
-    df_plot = df.copy()
-    df_plot["speed_kph"] = df_plot["speed"] * K
-    df_plot["time_period"] = df_plot.index.floor("30min")
-
-    # 각 시간 구간별 속도 데이터 수집
-    time_periods = sorted(df_plot["time_period"].unique())
-    speed_data = []
-    period_labels = []
-
-    for period in time_periods:
-        period_speeds = df_plot[df_plot["time_period"] == period]["speed_kph"]
-        if len(period_speeds) > 0:  # 데이터가 있는 구간만
-            speed_data.append(period_speeds.values)
-            period_labels.append(period.strftime("%H:%M"))
-
-    if not speed_data:
-        print("No data available for plotting.")
-        return stats_filtered
-
-    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-
-    # Boxplot 생성
-    bp = ax.boxplot(speed_data, labels=period_labels, patch_artist=True,
-                    showmeans=True, meanline=True,
-                    boxprops=dict(facecolor='lightblue', alpha=0.7),
-                    meanprops=dict(color='red', linewidth=2),
-                    medianprops=dict(color='darkblue', linewidth=2),
-                    whiskerprops=dict(color='black'),
-                    capprops=dict(color='black'),
-                    flierprops=dict(marker='o', markerfacecolor='red', markersize=3, alpha=0.5))
-
-    # 제목/레이블
-    ax.set_title(f"{title} - Speed Distribution (30-min intervals)", fontsize=14)
-    ax.set_xlabel("Time Period", fontsize=12)
-    ax.set_ylabel("Speed (km/h)", fontsize=12)
-
-    # 격자 및 축 포맷
-    ax.grid(True, alpha=0.3, axis='y')
-
-    # x축 레이블 회전 (너무 많으면)
-    if len(period_labels) > 8:
-        plt.xticks(rotation=45)
-
-    # 범례 추가 (평균선과 중앙값선 설명)
-    ax.plot([], [], color='red', linewidth=2, label='Mean')
-    ax.plot([], [], color='darkblue', linewidth=2, label='Median')
-    ax.legend(loc='upper right')
-
-    plt.tight_layout()
-
-    # # ---------------------------
-    # # Summary Statistics
-    # # ---------------------------
-    # print("\n=== Summary Statistics ===")
-    # print(f"Time periods analyzed: {len(stats_filtered)}")
-    # print(f"Total data points: {int(stats_filtered['n'].sum())} tasks")
-    # print(f"Overall average speed: {(stats_filtered['mu'] * K).mean():.1f} km/h")
-    # print(f"Speed standard deviation: {(stats_filtered['sigma'] * K).mean():.1f} km/h")
-    # print(f"Maximum period speed: {(stats_filtered['mu'] * K).max():.1f} km/h")
-    # print(f"Minimum period speed: {(stats_filtered['mu'] * K).min():.1f} km/h")
-    # print(f"Average tasks per period: {stats_filtered['n'].mean():.1f} tasks")
-
-    return stats_filtered
-
 @runtime_checkable
 class _SupportsRichComparisonT(Protocol):
     """Protocol for types that support rich comparison operations.
@@ -511,6 +207,9 @@ class Simulator(ABC, Generic[V, T]):
     _pending_tasks_queue: deque[T]
     _working_tasks_queue: deque[T]
     _completed_tasks_queue: deque[T]
+    _cooldown_tasks_queue: deque[T]
+    _temp_cooldown_tasks_queue: list[T]
+    _temp_working_tasks_queue: list[T]
     _executor: ThreadPoolExecutor
 
     _temp_task_texts: dict[State, Text]
@@ -518,6 +217,7 @@ class Simulator(ABC, Generic[V, T]):
     _task_time_mean: Text
     _task_time_std: Text
     _max_vehicle_utilization: Text
+
 
     def __init__(self):
         """Initialize a new Simulator instance.
@@ -542,6 +242,9 @@ class Simulator(ABC, Generic[V, T]):
         self._pending_tasks_queue = deque()
         self._working_tasks_queue = deque()
         self._completed_tasks_queue = deque()
+        self._cooldown_tasks_queue = deque()
+        self._temp_cooldown_tasks_queue = []
+        self._temp_working_tasks_queue = []
 
     def _init_thread_pool_executor(self, progress: Progress, j: int):
         init_msg = "[green]Initializing Thread Pool Executor..."
@@ -709,6 +412,7 @@ class Simulator(ABC, Generic[V, T]):
         self._operational_vehicles = Text("0%")
 
         self._pending_queue = Text("0")
+        self._cooldown_queue = Text("0")
         self._working_queue = Text("0")
         self._completed_queue = Text("0")
 
@@ -733,6 +437,7 @@ class Simulator(ABC, Generic[V, T]):
 
         t.add_section()
         t.add_row("[b]Pending Queue Size[/b]: ", self._pending_queue)
+        t.add_row("[b]Cooldown Queue Size[/b]: ", self._cooldown_queue)
         t.add_row("[b]Working Queue Size[/b]: ", self._working_queue)
         t.add_row("[b]Completed Queue Size[/b]: ", self._completed_queue)
 
@@ -786,11 +491,11 @@ class Simulator(ABC, Generic[V, T]):
                 print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_vehicle_update(start: int, end: int, dt: Time, now: Time):
-            # try:
+            try:
                 for i in range(start, end):
                     self._vehicles[i].vehicle_update(dt, now)
-            # except Exception as e:
-            #     print(f"Error during vehicle update in range ({start}, {end}): {e}")
+            except Exception as e:
+                print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_refresh_timer(start: int, end: int, dt: Time, now: Time):
             try:
@@ -862,44 +567,63 @@ class Simulator(ABC, Generic[V, T]):
             if len(self._completed_tasks_queue) == 0:
                 self._task_time_mean.plain = "--:--:--"
                 self._task_time_std.plain = "--:--:--"
-                return
 
-            start_times = np.asarray(
-                [float(task.start_at) for task in self._completed_tasks_queue]
-            )
-            end_times = np.asarray(
-                [float(task.completed_at) for task in self._completed_tasks_queue]
-            )
+            else:
+                start_times = np.asarray(
+                    [float(task.start_at) for task in self._completed_tasks_queue]
+                )
+                end_times = np.asarray(
+                    [float(task.completed_at) for task in self._completed_tasks_queue]
+                )
 
-            d_times = end_times - start_times
+                d_times = end_times - start_times
+                mean = ClockTime(np.mean(d_times))
+                std = ClockTime(np.std(d_times))
+                self._task_time_mean.plain = str(mean)
+                self._task_time_std.plain = str(std)
+
             vehicle_utilization = vehicle_usage / len(self._vehicles) * 100
 
-            mean = ClockTime(np.mean(d_times))
-            std = ClockTime(np.std(d_times))
+
             self._current_max_vehicle_utilization = max(
                 self._current_max_vehicle_utilization, vehicle_utilization
             )
             self._max_vehicle_utilization.plain = f"{self._current_max_vehicle_utilization:.1f}%"
 
-            self._task_time_mean.plain = str(mean)
-            self._task_time_std.plain = str(std)
+
             opreational_perventage = vehicle_oprational / len(self._vehicles) * 100
             self._operational_vehicles.plain = f"{opreational_perventage:.1f}%"
 
             self._pending_queue.plain = str(len(self._pending_tasks_queue))
+            self._cooldown_queue.plain = str(len(self._cooldown_tasks_queue))
             self._working_queue.plain = str(len(self._working_tasks_queue))
             self._completed_queue.plain = str(len(self._completed_tasks_queue))
+
+        def reassign_cooldown_tasks():
+            self._temp_cooldown_tasks_queue.sort(key= lambda t: t.start_at)
+
+            for task in self._temp_cooldown_tasks_queue:
+                self._cooldown_tasks_queue.append(task)
+                self._progress.advance(self._t_working, -1)
+
+            self._temp_cooldown_tasks_queue.clear()
+
+            for task in self._temp_working_tasks_queue:
+                self._working_tasks_queue.append(task)
+
+            self._temp_working_tasks_queue.clear()
 
         with Live(panel, console=CONSOLE, auto_refresh=True) as _:
             while not self.done:
                 execute_parallel(do_update, batch_size, dt, now)
                 execute_parallel(do_refresh_timer, batch_size, dt, now)
-                execute_parallel(do_vehicle_update, batch_size, dt, now)
+                execute_parallel(do_vehicle_update, batch_size, dt, now) # recharge battery -> enter ground
                 self.sim_update(dt, now)
                 execute_parallel(do_post_update, batch_size, dt, now)
                 self.sim_post_update(dt, now)
                 do_task_update()
                 progress.update(t, description=f"[green]Simulation Time: {now}")
+                reassign_cooldown_tasks()
                 refresh_state_counts()
 
                 now += dt
@@ -910,16 +634,26 @@ class Simulator(ABC, Generic[V, T]):
         Returns:
             Sequence[T]: A sequence of pending tasks currently in the simulation.
         """
+        while len(self._cooldown_tasks_queue) > 0:
+            task = self._cooldown_tasks_queue.popleft()
+            self._temp_working_tasks_queue.append(task)
+            # self._working_tasks_queue.append(task)
+            self._progress.advance(self._t_working)
+            yield task
+
         while len(self._pending_tasks_queue) > 0:
             self._progress.advance(self._t_working)
             task = self._pending_tasks_queue.popleft()
-            self._working_tasks_queue.append(task)
+            self._temp_working_tasks_queue.append(task)
+            # self._working_tasks_queue.append(task)
             yield task
 
+
+
     def failed_to_assign_task(self, task: T):
-        self._pending_tasks_queue.appendleft(task)
-        self._working_tasks_queue.pop()
-        self._progress.advance(self._t_working, -1)
+        self._temp_working_tasks_queue.remove(task)
+        task.priority += 0.1
+        self._temp_cooldown_tasks_queue.append(task)
 
 
     def get_tasks(self) -> Sequence[T]:
@@ -1125,3 +859,12 @@ class Simulator(ABC, Generic[V, T]):
 
     def _shutdown_executor(self, hard_shutdown: bool = False):
         self._executor.shutdown(wait=True, cancel_futures=hard_shutdown)
+
+    @property
+    def pending_tasks_count(self) -> int:
+        """Get the number of pending tasks in the simulation.
+
+        Returns:
+            int: The count of pending tasks.
+        """
+        return len(self._pending_tasks_queue) + len(self._cooldown_tasks_queue)

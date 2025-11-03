@@ -17,6 +17,8 @@ Key features:
 - Temperature effects on battery performance
 """
 
+from __future__ import annotations
+
 from .unit import ZERO_ENERGY, Energy
 
 
@@ -94,9 +96,9 @@ class BatteryStatus:
             msg = "Battery charge cannot be negative"
             raise ValueError(msg)
         if wh > self._capacity:
-            msg = "Battery charge cannot exceed capacity"
-            raise ValueError(msg)
-        self._current = wh
+            self._current = self._capacity
+        else:
+            self._current = wh
 
     def consume_energy(self, energy: Energy) -> bool:
         """Consume energy from the battery.
@@ -111,10 +113,7 @@ class BatteryStatus:
             msg = "Energy consumption cannot be negative"
             raise ValueError(msg)
 
-        if self._current >= energy:
-            self._current = type(self._current).from_si(float(self._current) - float(energy))
-            return True
-        return False
+        self._current -= energy
 
     def charge_battery(self, energy: Energy) -> Energy:
         """Add energy to the battery.
@@ -132,10 +131,21 @@ class BatteryStatus:
         available_capacity = type(self._capacity).from_si(
             float(self._capacity) - float(self._current)
         )
-        actual_charge = type(energy).from_si(min(float(energy), float(available_capacity)))
+        actual_charge = type(energy).from_si(
+            min(float(energy), float(available_capacity))
+        )
 
-        self._current = type(self._current).from_si(float(self._current) + float(actual_charge))
+        self._current = type(self._current).from_si(
+            float(self._current) + float(actual_charge)
+        )
         return actual_charge
+
+    def replace_battery(self, battery: BatteryStatus | None = None):
+        if battery is None:
+            self._current = self._capacity
+
+        else:
+            self.__init__(battery.capacity, battery.current)
 
     def is_empty(self) -> bool:
         """Check if the battery is completely discharged.
@@ -152,3 +162,9 @@ class BatteryStatus:
             bool: True if battery charge equals capacity.
         """
         return self._current >= self._capacity
+
+    def __str__(self) -> str:
+        return f"BatteryStatus(current={self._current}, capacity={self._capacity}, percentage={self.percentage:.2f}%)"
+
+    def __repr__(self) -> str:
+        return f"BatteryStatus(current={self._current}, capacity={self._capacity}, percentage={self.percentage:.2f}%)"

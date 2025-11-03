@@ -106,6 +106,7 @@ Usage Examples:
 """
 
 from dronesim.energy import BatteryStatus
+from dronesim.energy.unit import Energy
 from dronesim.geo import GeoPoint
 from dronesim.mission import DeliveryState, DeliveryTask
 from dronesim.unit import KilometersPerHour, Length, Minute, Power, Time, Velocity, Watt
@@ -116,7 +117,9 @@ from .drone import Drone
 DEFAULT_VELOCITY = KilometersPerHour(50.0)
 DEFAULT_TRANSITION_DURATION = Minute(1.0)
 DEFAULT_CONSUMPTION = Watt(0.0)
-DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = 20.0  # Minimum battery percentage to be operational
+DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = (
+    20.0  # Minimum battery percentage to be operational
+)
 
 
 class DeliveryDrone(Drone[DeliveryTask]):
@@ -245,6 +248,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
     _deliveries_per_charge: int
     _deliveries_count: int
     _is_going_to_base: bool
+    _is_on_base: bool
+    _start_travel_time: Time | None
+    battery_usage_history: list[tuple[Time, Time, Energy]]
 
     def __init__(
         self,
@@ -258,7 +264,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         operational_battery_percentage: float = DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE,
         base_pos: dict[int, GeoPoint] | None = None,
         max_task_queue_size: int = 0,
-        deliveries_per_charge: int = 1
+        deliveries_per_charge: int = 1,
     ):
         super().__init__(
             pos,
@@ -275,6 +281,21 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._deliveries_per_charge = deliveries_per_charge
         self._deliveries_count = 0
         self._is_going_to_base = False
+        self._is_on_base = True
+        self._start_travel_time = None
+        self.battery_usage_history = []
+
+    def _get_nearest_base(self, last_point: GeoPoint | None = None) -> GeoPoint:
+        if last_point is None:
+            k, v = min(
+                self.base_pos.items(), key=lambda t: self.position.distance_to(t[1])
+            )
+        else:
+            k, v = min(
+                self.base_pos.items(), key=lambda t: last_point.distance_to(t[1])
+            )
+
+        return v
 
     def _try_assign_new_destination(self, now: Time) -> None:
         """Execute intelligent destination assignment using state-aware route optimization.
@@ -382,14 +403,19 @@ class DeliveryDrone(Drone[DeliveryTask]):
             intervention. The method integrates seamlessly with both the drone state
             machine and delivery task workflow management systems.
         """
-        if not self.current_tasks and len(self.task_queue) == 0:
-            if not self.is_operational():
-                k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
+        if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
+            if not self.is_operational() or not self._is_on_base:
+                v = self._get_nearest_base()
                 self.current_destination = v
                 self._is_going_to_base = True
                 self._start_flight(now)
             return
-        if not self.current_tasks:
+
+        if self._start_travel_time is None:
+            self._is_on_base = False
+            self._start_travel_time = now
+
+        if len(self.current_tasks) == 0:
             self.current_tasks = list(self.task_queue)
             self._deliveries_count += len(self.current_tasks)
             self.task_queue.clear()
@@ -419,10 +445,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._current_mission.next(now)
         self._start_flight(now)
 
-    def route_remainder(self, new_task: DeliveryTask |None = None) -> tuple[Length, GeoPoint]:
+    def route_remainder(
+        self, new_task: DeliveryTask | None = None
+    ) -> tuple[Length, GeoPoint]:
         pick_up_points: list[GeoPoint] = []
         drop_off_points: list[GeoPoint] = []
-        if self.current_tasks is not None:
+        if len(self.current_tasks) > 0:
             for task in self.current_tasks:
                 if task.current_state < DeliveryState.SERVICE_PICKUP:
                     pick_up_points.append(task.origin)
@@ -431,8 +459,11 @@ class DeliveryDrone(Drone[DeliveryTask]):
                     drop_off_points.append(task.destination)
 
         else:
-            if len(self.task_queue) == 0:
-                return Kilometer(0), self.position
+            if len(self.task_queue) == 0 and new_task is None:
+                return (
+                    self._get_nearest_base().distance_to(self.position),
+                    self.position,
+                )
 
         pick_up_points.sort(key=lambda t: self.position.distance_to(t))
         if len(pick_up_points) > 0:
@@ -443,7 +474,6 @@ class DeliveryDrone(Drone[DeliveryTask]):
         new_pick_up_points: list[GeoPoint] = []
         new_drop_off_points: list[GeoPoint] = []
 
-
         for task in self.task_queue:
             new_pick_up_points.append(task.origin)
             new_drop_off_points.append(task.destination)
@@ -453,22 +483,30 @@ class DeliveryDrone(Drone[DeliveryTask]):
             new_drop_off_points.append(new_task.destination)
 
         if len(drop_off_points) > 0:
-            new_pick_up_points.sort(key = lambda t: drop_off_points[-1].distance_to(t))
+            new_pick_up_points.sort(key=lambda t: drop_off_points[-1].distance_to(t))
         else:
-            new_pick_up_points.sort(key = lambda t: self.position.distance_to(t))
+            new_pick_up_points.sort(key=lambda t: self.position.distance_to(t))
 
         if len(new_pick_up_points) > 0:
-            new_drop_off_points.sort(key = lambda t: new_pick_up_points[-1].distance_to(t))
+            new_drop_off_points.sort(
+                key=lambda t: new_pick_up_points[-1].distance_to(t)
+            )
         else:
-            new_drop_off_points.sort(key = lambda t: self.position.distance_to(t))
+            new_drop_off_points.sort(key=lambda t: self.position.distance_to(t))
 
         route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
         route += new_pick_up_points + new_drop_off_points
+        route += [self._get_nearest_base(route[-1])]
 
         total_distance: Length = Kilometer(0)
 
+        prev_point: GeoPoint = None
         for point in route:
-            total_distance += self.position.distance_to(point)
+            if prev_point is None:
+                total_distance += self.position.distance_to(point)
+            else:
+                total_distance += prev_point.distance_to(point)
+            prev_point = point
 
         return total_distance, route[-1]
 
@@ -601,6 +639,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         super().on_grounded(dt, now)
 
+        if self._is_on_base:
+            self.battery.replace_battery()
+
         if self.current_destination is None:
             if self._current_mission in DeliveryTask.ground_task():
                 wait_for_pickup(self._current_mission)
@@ -608,6 +649,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 return
 
             self._try_assign_new_destination(now)
+
             return
 
     def enter_grounded(self, now: Time) -> None:
@@ -743,11 +785,17 @@ class DeliveryDrone(Drone[DeliveryTask]):
             • State machine integration ensures valid state transitions
             • Task list operations maintain queue integrity even with rapid completions
         """
-        super().enter_grounded(now)
-
         if self._is_going_to_base:
             self._is_going_to_base = False
             self._deliveries_count = 0
+            self._is_on_base = True
+            battery_useage = self.battery.capacity - self.battery.current
+            self.battery_usage_history.append(
+                (self._start_travel_time, now, battery_useage)
+            )
+            self._start_travel_time = None
+
+        super().enter_grounded(now)
 
         if self._current_mission is not None:
             self._current_mission.next(now)
@@ -759,14 +807,28 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self.current_tasks.remove(self._current_mission)
                 self._current_mission = None
 
-    def is_operational(self) -> bool:
-        c1 = super().is_operational()
-        c2 = (self._deliveries_count + len(self.task_queue)) < self._deliveries_per_charge
+    def can_accept_task(self) -> bool:
+        # c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+        c1 = True
+        c2 = not self._is_going_to_base
         return c1 and c2
+
+    def assign(self, task):
+        if self.can_accept_task():
+            distance = float(self.route_remainder(task)[0])
+            battery_usage = distance * float(
+                self.power_transit
+            ) / float(self.velocity)
+
+
+            next_battery = float(self.battery.current) - battery_usage
+            if 100 * next_battery / float(self.battery.capacity) < self.operational_battery_percentage:
+                return False
+
+
+            return super().assign(task)
+        return False
 
     @property
     def is_busy(self) -> bool:
         return super().is_busy or self._is_going_to_base
-
-    def post_update(self, dt, now):
-        return
