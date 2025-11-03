@@ -209,6 +209,7 @@ class Simulator(ABC, Generic[V, T]):
     _completed_tasks_queue: deque[T]
     _cooldown_tasks_queue: deque[T]
     _temp_cooldown_tasks_queue: list[T]
+    _temp_working_tasks_queue: list[T]
     _executor: ThreadPoolExecutor
 
     _temp_task_texts: dict[State, Text]
@@ -243,6 +244,7 @@ class Simulator(ABC, Generic[V, T]):
         self._completed_tasks_queue = deque()
         self._cooldown_tasks_queue = deque()
         self._temp_cooldown_tasks_queue = []
+        self._temp_working_tasks_queue = []
 
     def _init_thread_pool_executor(self, progress: Progress, j: int):
         init_msg = "[green]Initializing Thread Pool Executor..."
@@ -565,27 +567,30 @@ class Simulator(ABC, Generic[V, T]):
             if len(self._completed_tasks_queue) == 0:
                 self._task_time_mean.plain = "--:--:--"
                 self._task_time_std.plain = "--:--:--"
-                return
 
-            start_times = np.asarray(
-                [float(task.start_at) for task in self._completed_tasks_queue]
-            )
-            end_times = np.asarray(
-                [float(task.completed_at) for task in self._completed_tasks_queue]
-            )
+            else:
+                start_times = np.asarray(
+                    [float(task.start_at) for task in self._completed_tasks_queue]
+                )
+                end_times = np.asarray(
+                    [float(task.completed_at) for task in self._completed_tasks_queue]
+                )
 
-            d_times = end_times - start_times
+                d_times = end_times - start_times
+                mean = ClockTime(np.mean(d_times))
+                std = ClockTime(np.std(d_times))
+                self._task_time_mean.plain = str(mean)
+                self._task_time_std.plain = str(std)
+
             vehicle_utilization = vehicle_usage / len(self._vehicles) * 100
 
-            mean = ClockTime(np.mean(d_times))
-            std = ClockTime(np.std(d_times))
+
             self._current_max_vehicle_utilization = max(
                 self._current_max_vehicle_utilization, vehicle_utilization
             )
             self._max_vehicle_utilization.plain = f"{self._current_max_vehicle_utilization:.1f}%"
 
-            self._task_time_mean.plain = str(mean)
-            self._task_time_std.plain = str(std)
+
             opreational_perventage = vehicle_oprational / len(self._vehicles) * 100
             self._operational_vehicles.plain = f"{opreational_perventage:.1f}%"
 
@@ -603,6 +608,11 @@ class Simulator(ABC, Generic[V, T]):
 
             self._temp_cooldown_tasks_queue.clear()
 
+            for task in self._temp_working_tasks_queue:
+                self._working_tasks_queue.append(task)
+
+            self._temp_working_tasks_queue.clear()
+
         with Live(panel, console=CONSOLE, auto_refresh=True) as _:
             while not self.done:
                 execute_parallel(do_update, batch_size, dt, now)
@@ -613,8 +623,8 @@ class Simulator(ABC, Generic[V, T]):
                 self.sim_post_update(dt, now)
                 do_task_update()
                 progress.update(t, description=f"[green]Simulation Time: {now}")
-                refresh_state_counts()
                 reassign_cooldown_tasks()
+                refresh_state_counts()
 
                 now += dt
 
@@ -626,20 +636,23 @@ class Simulator(ABC, Generic[V, T]):
         """
         while len(self._cooldown_tasks_queue) > 0:
             task = self._cooldown_tasks_queue.popleft()
-            self._working_tasks_queue.append(task)
+            self._temp_working_tasks_queue.append(task)
+            # self._working_tasks_queue.append(task)
             self._progress.advance(self._t_working)
             yield task
 
         while len(self._pending_tasks_queue) > 0:
             self._progress.advance(self._t_working)
             task = self._pending_tasks_queue.popleft()
-            self._working_tasks_queue.append(task)
+            self._temp_working_tasks_queue.append(task)
+            # self._working_tasks_queue.append(task)
             yield task
 
 
 
     def failed_to_assign_task(self, task: T):
-        self._working_tasks_queue.pop()
+        self._temp_working_tasks_queue.remove(task)
+        task.priority += 0.1
         self._temp_cooldown_tasks_queue.append(task)
 
 
@@ -846,3 +859,12 @@ class Simulator(ABC, Generic[V, T]):
 
     def _shutdown_executor(self, hard_shutdown: bool = False):
         self._executor.shutdown(wait=True, cancel_futures=hard_shutdown)
+
+    @property
+    def pending_tasks_count(self) -> int:
+        """Get the number of pending tasks in the simulation.
+
+        Returns:
+            int: The count of pending tasks.
+        """
+        return len(self._pending_tasks_queue) + len(self._cooldown_tasks_queue)

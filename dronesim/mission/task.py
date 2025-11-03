@@ -352,6 +352,7 @@ class Task(ABC):
     destination: GeoPoint
     _started_at: Time | None
     _completed_at: Time | None
+    _priority: float
 
     _state_machine: StateMachine | None = None
 
@@ -589,6 +590,7 @@ class Task(ABC):
 
         self._started_at = None
         self._completed_at = None
+        self._priority = 0.1
 
     def init_state_machine(self, initial_state: State, nodes_graph: StateGraph) -> None:
         """Initialize the task state machine with comprehensive configuration and validation.
@@ -1010,3 +1012,25 @@ class Task(ABC):
             raise NotImplementedError(msg)
 
         return self._state_machine.get_state_list()
+
+    @property
+    def priority(self) -> int:
+        """Get the task priority level for scheduling and resource allocation.
+
+        Returns:
+            int: Priority level of the task, where higher values indicate higher priority.
+        """
+        return self._priority
+
+    @priority.setter
+    def priority(self, value: int) -> None:
+        """Set the task priority level for scheduling and resource allocation.
+
+        Args:
+            value (int): Priority level to assign to the task, where higher values indicate
+                         higher priority.
+        """
+        if value <= 1:
+            self._priority = value
+        else:
+            self._priority = 1

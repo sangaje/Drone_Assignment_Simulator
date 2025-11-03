@@ -11,31 +11,194 @@ DATA_CSV_FILE = "./example/train.csv"
 EXPECT_CSV_FILE = "./example/train.csv"
 CLUSTER_DATA_FILE = "./example/train.csv"
 
+# DATA_CSV_FILE = "./test.csv"
+# EXPECT_CSV_FILE = "./Sample_Submission.csv"
+# CLUSTER_DATA_FILE = "./train.csv"
+
 N_CLUSTERS = 10
-WATING_TIME = Minute(0.1)
+WAITING_TIME = Minute(0.1)
 DT = Minute(0.1)
-DRONE_COUNT = 200
+DRONE_COUNT = 180
 
 J = 1
 BATCH_SIZE = 100
 
 DRONE_VELOCITY = KilometersPerHour(60)
-BATTERY = BatteryStatus(
-    capacity=WattHour(50000),
-    current=WattHour(50000)
-)
-IDLE_POWER = Watt(0)
-VTOL_POWER = Watt(0)
+BATTERY_CAPACITY = WattHour(5000)
+BATTERY_CURRENT = WattHour(5000)
+
+IDLE_POWER = Watt(10)
+VTOL_POWER = Watt(500)
 TRAINSIT_POWER = Watt(500)
 
-TASK_QUEUE_PER_DRONE=2
-DELVIERYS_PER_CHARGE=2
-
-
-
-
+TASK_QUEUE_PER_DRONE=4
+DELVIERYS_PER_CHARGE=0
 
 print("All modules imported successfully!")
+
+# MILP Optimization Hyperparameters
+# Objective Function Weight Coefficients
+ALPHA, BETA, GAMMA = 1.0, 1.0, 1.0  # Distance, Energy, Priority weights
+
+# Constraint Parameters
+SIGMA = 0.2  # Safety margin ratio (reserves 20% of battery capacity)
+
+# Solver Parameters
+TIME_LIMIT = 5.0      # Solver time limit in seconds
+MIP_REL_GAP = 1e-3    # Relative optimality gap
+
+# Drop Penalty Configuration
+# Option 1: Uniform penalty for all tasks
+# RHO = (ALPHA + BETA + GAMMA)  # Balanced approach
+RHO = 1
+
+TASK_BATCH_SIZE = 10
+
+# Option 2: Task-specific penalty based on characteristics
+# rho_j can be calculated per task based on:
+# - Task priority/urgency
+# - Customer tier/service level
+# - Delivery time window constraints
+# - Distance from depot
+#
+# Example implementations:
+# rho_j = base_penalty * priority_multiplier
+# rho_j = base_penalty * (1 + urgency_factor)
+# rho_j = base_penalty * (2.0 if is_premium_customer else 1.0)
+
+# Recommended Drop Penalty Strategies:
+# 1. Mission-Critical: rho = 100 * max(alpha, beta, gamma) - virtually never drop
+# 2. Balanced: rho = 2 * (alpha + beta + gamma) - drop only clearly infeasible tasks
+# 3. Efficiency-First: rho = 0.5 * (alpha + beta + gamma) - aggressively drop inefficient tasks
+
+import numpy as np
+from scipy.optimize import Bounds, LinearConstraint, milp
+
+
+def build_milp_problem(n_drone, n_task, d_bar, e_bar, a_bar, e, w, Q, E, rho = None):
+    """Build complete MILP problem: objective, bounds, and constraints."""
+    n_drones = n_drone
+    n_tasks = n_task
+    n_x = n_drones * n_tasks  # x_{ij} variables
+    n_y = n_tasks             # y_j variables
+    n_total = n_x + n_y
+
+    # Helper functions for variable indexing
+    def idx_x(i, j): return i * n_tasks + j
+    def idx_y(j): return n_x + j
+
+    # Normalize parameters for numerical stability
+    # d_max = max(np.max(data['d']), 1.0)
+    # a_max = max(np.max(data['priority']), 1.0)
+    # battery_safe = np.where(data['battery_capacity'] > 0, data['battery_capacity'], 1.0)
+
+    # Build objective function: c^T x
+    c_x = (ALPHA * d_bar +
+           BETA * e_bar -
+           GAMMA * a_bar[None, :])
+
+    if rho is None:
+        rho = RHO * np.ones(n_tasks, float)
+
+    c = np.zeros(n_total, float)
+    c[:n_x] = c_x.ravel(order="C")
+    c[n_x:] = rho
+
+    # Build variable bounds
+    lb = np.zeros(n_total)
+    ub = np.ones(n_total)
+    ub_x = ub[:n_x].reshape(n_drones, n_tasks)
+    ub_x[:] = w  # Apply distance gate
+
+    # Mark energy-infeasible pairs
+    battery_limit = (1.0 - SIGMA) * E
+    energy_infeasible = e > (battery_limit[:, None] + 1e-12)
+    ub_x[energy_infeasible] = 0.0
+
+    ub[:n_x] = ub_x.ravel(order="C")
+    bounds = Bounds(lb, ub)
+
+    # Build constraints
+    constraints = []
+
+    # (1) Assignment: each task assigned to one drone or dropped
+    A_eq = np.zeros((n_tasks, n_total))
+    for j in range(n_tasks):
+        for i in range(n_drones):
+            A_eq[j, idx_x(i, j)] = 1.0
+        A_eq[j, idx_y(j)] = 1.0
+    constraints.append(LinearConstraint(A_eq, lb=np.ones(n_tasks), ub=np.ones(n_tasks)))
+
+    # (2) Capacity: each drone task limit
+    A_cap = np.zeros((n_drones, n_total))
+    for i in range(n_drones):
+        for j in range(n_tasks):
+            A_cap[i, idx_x(i, j)] = 1.0
+    constraints.append(LinearConstraint(A_cap, lb=-np.inf*np.ones(n_drones),
+                                       ub=Q.astype(float)))
+
+    # (3) Battery: energy consumption limit
+    A_battery = np.zeros((n_drones, n_total))
+    for i in range(n_drones):
+        for j in range(n_tasks):
+            if ub_x[i, j] > 0.0:
+                A_battery[i, idx_x(i, j)] = e[i, j]
+    constraints.append(LinearConstraint(A_battery, lb=-np.inf*np.ones(n_drones),
+                                       ub=battery_limit.astype(float)))
+
+    return c, bounds, constraints, ub_x, battery_limit
+
+def solve_and_parse(c, bounds, constraints, n_drones, n_tasks):
+    """Solve MILP and parse results."""
+    n_x = n_drones * n_tasks
+    n_total = len(c)
+
+    # Solve
+    integrality = np.ones(n_total, dtype=int)
+    res = milp(
+        c=c,
+        integrality=integrality,
+        bounds=bounds,
+        constraints=constraints,
+        options={
+            "time_limit": TIME_LIMIT,
+            "mip_rel_gap": MIP_REL_GAP,
+            "presolve": True
+        }
+    )
+
+    # Parse solution
+    x_bin = np.zeros((n_drones, n_tasks), dtype=int)
+    y_bin = np.zeros(n_tasks, dtype=int)
+
+    if res.x is not None:
+        x_raw = res.x[:n_x].reshape(n_drones, n_tasks)
+        y_raw = res.x[n_x:]
+        x_bin = (x_raw > 0.5).astype(int)
+        y_bin = (y_raw > 0.5).astype(int)
+
+    assigned = [(i, j) for i in range(n_drones) for j in range(n_tasks) if x_bin[i, j] == 1]
+    dropped = [j for j in range(n_tasks) if y_bin[j] == 1]
+    objective = float(res.fun) if res.fun is not None else float('inf')
+
+    return {
+        'x_bin': x_bin,
+        'y_bin': y_bin,
+        'assigned': assigned,
+        'dropped': dropped,
+        'objective': objective,
+        'status': res.status,
+        'message': res.message
+    }
+
+def validate_solution(result, data, battery_limit):
+    """Validate solution satisfies all constraints."""
+    x_bin, y_bin = result['x_bin'], result['y_bin']
+
+    assert np.all(x_bin.sum(axis=0) + y_bin == 1), "Assignment constraint violated"
+    assert np.all(x_bin.sum(axis=1) <= data['capacity']), "Capacity constraint violated"
+    assert np.all((data['e'] * x_bin).sum(axis=1) <= battery_limit + 1e-6), "Battery constraint violated"
+    assert np.all(x_bin <= data['w'] + 1e-9), "Distance gate constraint violated"
 
 # Define the main simulation class for drone assignments
 class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
@@ -164,7 +327,10 @@ class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
                     yield DeliveryDrone(
                         pos=self.target_center,
                         velocity=DRONE_VELOCITY,
-                        battery=BATTERY,
+                        battery=BatteryStatus(
+                            capacity=BATTERY_CAPACITY,
+                            current=BATTERY_CURRENT
+                        ),
                         power_idle=IDLE_POWER,
                         power_vtol=VTOL_POWER,
                         power_transit=TRAINSIT_POWER,
@@ -185,7 +351,10 @@ class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
                         yield DeliveryDrone(
                             pos=base,
                             velocity=DRONE_VELOCITY,
-                            battery=BATTERY,
+                            battery=BatteryStatus(
+                                capacity=BATTERY_CAPACITY,
+                                current=BATTERY_CURRENT
+                            ),
                             power_idle=IDLE_POWER,
                             power_vtol=VTOL_POWER,
                             power_transit=TRAINSIT_POWER,
@@ -201,7 +370,10 @@ class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
                 yield DeliveryDrone(
                     pos=last_base,
                     velocity=DRONE_VELOCITY,
-                    battery=BATTERY,
+                    battery=BatteryStatus(
+                        capacity=BATTERY_CAPACITY,
+                        current=BATTERY_CURRENT
+                    ),
                     power_idle=IDLE_POWER,
                     power_vtol=VTOL_POWER,
                     power_transit=TRAINSIT_POWER,
@@ -217,7 +389,10 @@ class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
                 yield DeliveryDrone(
                     pos=self.target_center,
                     velocity=DRONE_VELOCITY,
-                    battery=BATTERY,
+                    battery=BatteryStatus(
+                        capacity=BATTERY_CAPACITY,
+                        current=BATTERY_CURRENT
+                    ),
                     power_idle=IDLE_POWER,
                     power_vtol=VTOL_POWER,
                     power_transit=TRAINSIT_POWER,
@@ -227,54 +402,148 @@ class DroneAssignmentsProblemSimulator(Simulator[DeliveryDrone, DeliveryTask]):
 
         return None
 
-class OptimalDistanceAssignmentStrategy(DroneAssignmentsProblemSimulator):
-    """Nearest Drone Assignment Strategy implementing Greedy Distance-Based Algorithm.
-    Assigns each task to the closest available drone based on geographical proximity.
+class MILPDroneAssignmentStrategy(DroneAssignmentsProblemSimulator):
+    """MILP-Based Optimal Drone Assignment Strategy using Mixed-Integer Linear Programming.
+    
+    This strategy formulates the drone-task assignment problem as a MILP optimization
+    problem and finds the globally optimal solution considering multiple objectives:
+    - Minimize total flight distance
+    - Minimize energy consumption
+    - Maximize task priority satisfaction
+    - Minimize task drops
+    
+    The optimizer respects all physical constraints:
+    - Battery capacity limits with safety margins
+    - Drone task capacity limits
+    - Operational range constraints
     """
 
-    def __init__(self, drone_count: int = 50, wating_time: Time = Minute(1)):
+    def __init__(self, drone_count: int = 50, waiting_time: Time = Minute(1)):
         super().__init__(CLUSTER_DATA_FILE, drone_count, N_CLUSTERS)
-        self.current = wating_time
-        self.wating_time = wating_time
+        self.current = waiting_time
+        self.waiting_time = waiting_time
 
     def sim_update(self, dt, now):
-        """Update the simulation state by assigning tasks to nearest available drones."""
+        """Update simulation by solving MILP optimization for pending tasks."""
         if now < self.current:
-            return
-        self.current += self.wating_time
+            if self.pending_tasks_count < TASK_BATCH_SIZE:
+                return
+        else:
+            self.current += self.waiting_time
 
-        for task in self.get_pending_tasks():
-            # Find the nearest available drone to the task's origin
-            if not self._find_optimal_drone(task):
-                self.failed_to_assign_task(task)
-                break
 
-    def _find_optimal_drone(self, task: DeliveryTask):
-        """Find the drone with minimum distance to the task's origin."""
-        # Only consider operational drones (not full and has battery)
         available_drones = [drone for drone in self.get_vehicles() if drone.is_operational()]
         if len(available_drones) == 0:
-            return False
+            return
+        tasks = []
 
-        drone_distances = []
+        for task in self.get_pending_tasks():
+            tasks.append(task)
 
-        for drone in available_drones:
-            distance, last_point = drone.route_remainder(task)
-            d_distance = distance - drone.route_remainder()[0]
-            drone_distances.append((drone, distance, d_distance))
+        if len(tasks) == 0:
+            return
 
-        # Sort by distance (ascending) - using float conversion for sorting
-        drone_distances.sort(key=lambda x: float(x[1]))
+        # Prepare optimization data
+        n_drones = len(available_drones)
+        n_tasks = len(tasks)
+        # print(n_drones, n_tasks)
 
-        # Try to assign to drones in order of proximity
-        for drone, _, d_distance in drone_distances:
-            if drone.assign(task):
-                return True
-        return False
+        # Build parameter matrices
+        d_bar, e_bar, a_bar, e, w, Q, E = self._build_optimization_data(tasks, available_drones)
+
+        # Build and solve MILP problem
+        try:
+            c, bounds, constraints, ub_x, battery_limit = build_milp_problem(
+                n_drones, n_tasks, d_bar, e_bar, a_bar, e, w, Q, E
+            )
+
+            result = solve_and_parse(c, bounds, constraints, n_drones, n_tasks)
+
+            # Execute assignments
+            self._execute_assignments(result, tasks, available_drones)
+
+            # Handle dropped tasks
+            for task_idx in result['dropped']:
+                self.failed_to_assign_task(tasks[task_idx])
+
+        except Exception as ex:
+            print(f"MILP optimization failed: {ex}")
+            # Fallback: mark all tasks as failed
+            for task in tasks:
+                self.failed_to_assign_task(task)
+
+    def _build_optimization_data(self, tasks: list[DeliveryTask], drones: list[DeliveryDrone]):
+        """Build parameter matrices for MILP optimization."""
+        n_drones = len(drones)
+        n_tasks = len(tasks)
+
+        # Initialize matrices
+        d = np.zeros((n_drones, n_tasks))      # Total flight distance
+        e = np.zeros((n_drones, n_tasks))      # Energy consumption (Wh)
+        w = np.zeros((n_drones, n_tasks))      # Range feasibility
+        priority = np.zeros(n_tasks)           # Task priorities
+
+        Q = np.zeros(n_drones, dtype=int)      # Drone capacity
+        E = np.zeros(n_drones)                 # Battery capacity
+
+        # Calculate drone parameters
+        for i, drone in enumerate(drones):
+            if not drone.is_operational():
+                Q[i] = 0
+                E[i] = 0.0
+            else:
+                Q[i] = TASK_QUEUE_PER_DRONE
+                E[i] = float(drone.battery.current)
+
+        # Calculate task parameters
+        for j, task in enumerate(tasks):
+            # Simple priority: prefer earlier order times
+            priority[j] = task.priority
+
+            for i, drone in enumerate(drones):
+                d[i, j] = float(drone.route_remainder(task)[0]) + 1e6
+                e[i, j] = d[i, j] * float(drone.power_transit) / float(drone.velocity)
+
+                # Range constraint: check if drone can reach task
+                max_range = float(drone.velocity) * float(drone.battery.current) / float(drone.power_transit) * 0.8
+                w[i, j] = 1 if d[i, j] <= max_range else 0
+
+        # Normalize parameters (simple and safe)
+        d_max = np.max(d) if d.size > 0 else 1.0
+        e_max = np.max(E) if E.size > 0 else 1.0
+        a_max = np.max(priority) if priority.size > 0 else 1.0
+
+        d_bar = d / d_max
+        e_bar = e / e_max
+        a_bar = priority / a_max
+
+        return d_bar, e_bar, a_bar, e, w, Q, E
+
+    def _execute_assignments(self, result, tasks, drones):
+        """Execute the optimized assignments to drones."""
+        for drone_idx, task_idx in result['assigned']:
+            drone = drones[drone_idx]
+            task = tasks[task_idx]
+
+            if not drone.assign(task):
+                self.failed_to_assign_task(task)
 
     def sim_post_update(self, dt, now):
         """Perform any necessary operations after the simulation update."""
         pass
 
-optimal_sim = OptimalDistanceAssignmentStrategy(DRONE_COUNT, wating_time=WATING_TIME)
-optimal_sim.run(DATA_CSV_FILE, lambda task: task.order_time, j = J, dt = DT, batch_size=BATCH_SIZE)
+WAITING_TIME = Minute(1)
+TASK_QUEUE_PER_DRONE=4
+DELVIERYS_PER_CHARGE=4
+
+# Run MILP-Based Optimal Drone Assignment Strategy simulation
+milp_sim = MILPDroneAssignmentStrategy(DRONE_COUNT, waiting_time=WAITING_TIME)
+milp_sim.run(DATA_CSV_FILE, lambda task: task.order_time, j = J, dt = DT, batch_size=BATCH_SIZE)
+p_milp = SimPlot(milp_sim, EXPECT_CSV_FILE)
+p_milp.task_processing_times()
+p_milp.expected_time_analysis()
+p_milp.deviation_in_time_taken()
+p_milp.task_speed()
+p_milp.deviation_speed()
+p_milp.battery_usage()
+p_milp.show()

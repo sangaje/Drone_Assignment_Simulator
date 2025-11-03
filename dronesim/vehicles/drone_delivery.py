@@ -117,7 +117,9 @@ from .drone import Drone
 DEFAULT_VELOCITY = KilometersPerHour(50.0)
 DEFAULT_TRANSITION_DURATION = Minute(1.0)
 DEFAULT_CONSUMPTION = Watt(0.0)
-DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = 20.0  # Minimum battery percentage to be operational
+DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = (
+    20.0  # Minimum battery percentage to be operational
+)
 
 
 class DeliveryDrone(Drone[DeliveryTask]):
@@ -262,7 +264,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         operational_battery_percentage: float = DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE,
         base_pos: dict[int, GeoPoint] | None = None,
         max_task_queue_size: int = 0,
-        deliveries_per_charge: int = 1
+        deliveries_per_charge: int = 1,
     ):
         super().__init__(
             pos,
@@ -285,13 +287,15 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def _get_nearest_base(self, last_point: GeoPoint | None = None) -> GeoPoint:
         if last_point is None:
-            k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
+            k, v = min(
+                self.base_pos.items(), key=lambda t: self.position.distance_to(t[1])
+            )
         else:
-            k, v = min(self.base_pos.items(), key = lambda t: last_point.distance_to(t[1]))
+            k, v = min(
+                self.base_pos.items(), key=lambda t: last_point.distance_to(t[1])
+            )
 
         return v
-
-
 
     def _try_assign_new_destination(self, now: Time) -> None:
         """Execute intelligent destination assignment using state-aware route optimization.
@@ -411,7 +415,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._is_on_base = False
             self._start_travel_time = now
 
-        if  len(self.current_tasks) == 0:
+        if len(self.current_tasks) == 0:
             self.current_tasks = list(self.task_queue)
             self._deliveries_count += len(self.current_tasks)
             self.task_queue.clear()
@@ -441,7 +445,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._current_mission.next(now)
         self._start_flight(now)
 
-    def route_remainder(self, new_task: DeliveryTask |None = None) -> tuple[Length, GeoPoint]:
+    def route_remainder(
+        self, new_task: DeliveryTask | None = None
+    ) -> tuple[Length, GeoPoint]:
         pick_up_points: list[GeoPoint] = []
         drop_off_points: list[GeoPoint] = []
         if len(self.current_tasks) > 0:
@@ -454,7 +460,10 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         else:
             if len(self.task_queue) == 0 and new_task is None:
-                return self._get_nearest_base().distance_to(self.position), self.position
+                return (
+                    self._get_nearest_base().distance_to(self.position),
+                    self.position,
+                )
 
         pick_up_points.sort(key=lambda t: self.position.distance_to(t))
         if len(pick_up_points) > 0:
@@ -465,7 +474,6 @@ class DeliveryDrone(Drone[DeliveryTask]):
         new_pick_up_points: list[GeoPoint] = []
         new_drop_off_points: list[GeoPoint] = []
 
-
         for task in self.task_queue:
             new_pick_up_points.append(task.origin)
             new_drop_off_points.append(task.destination)
@@ -475,14 +483,16 @@ class DeliveryDrone(Drone[DeliveryTask]):
             new_drop_off_points.append(new_task.destination)
 
         if len(drop_off_points) > 0:
-            new_pick_up_points.sort(key = lambda t: drop_off_points[-1].distance_to(t))
+            new_pick_up_points.sort(key=lambda t: drop_off_points[-1].distance_to(t))
         else:
-            new_pick_up_points.sort(key = lambda t: self.position.distance_to(t))
+            new_pick_up_points.sort(key=lambda t: self.position.distance_to(t))
 
         if len(new_pick_up_points) > 0:
-            new_drop_off_points.sort(key = lambda t: new_pick_up_points[-1].distance_to(t))
+            new_drop_off_points.sort(
+                key=lambda t: new_pick_up_points[-1].distance_to(t)
+            )
         else:
-            new_drop_off_points.sort(key = lambda t: self.position.distance_to(t))
+            new_drop_off_points.sort(key=lambda t: self.position.distance_to(t))
 
         route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
         route += new_pick_up_points + new_drop_off_points
@@ -780,11 +790,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._deliveries_count = 0
             self._is_on_base = True
             battery_useage = self.battery.capacity - self.battery.current
-            self.battery_usage_history.append((self._start_travel_time, now, battery_useage))
+            self.battery_usage_history.append(
+                (self._start_travel_time, now, battery_useage)
+            )
             self._start_travel_time = None
 
         super().enter_grounded(now)
-
 
         if self._current_mission is not None:
             self._current_mission.next(now)
@@ -804,6 +815,17 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def assign(self, task):
         if self.can_accept_task():
+            distance = float(self.route_remainder(task)[0])
+            battery_usage = distance * float(
+                self.power_transit
+            ) / float(self.velocity)
+
+
+            next_battery = float(self.battery.current) - battery_usage
+            if 100 * next_battery / float(self.battery.capacity) < self.operational_battery_percentage:
+                return False
+
+
             return super().assign(task)
         return False
 

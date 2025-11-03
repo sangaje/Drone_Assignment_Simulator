@@ -1,5 +1,4 @@
-"""
-Drone–Task 1-Round Assignment MILP (SciPy + HiGHS) with Detailed Diagnostics
+"""Drone–Task 1-Round Assignment MILP (SciPy + HiGHS) with Detailed Diagnostics
 -----------------------------------------------------------------------------
 정식화(당신이 준 식과 동일):
 
@@ -38,17 +37,17 @@ Drone–Task 1-Round Assignment MILP (SciPy + HiGHS) with Detailed Diagnostics
 """
 
 from __future__ import annotations
+
 import numpy as np
-from typing import List, Tuple
-from scipy.optimize import milp, Bounds, LinearConstraint
-from scipy.sparse import dok_matrix, csr_matrix
+from scipy.optimize import Bounds, LinearConstraint, milp
+from scipy.sparse import csr_matrix, dok_matrix
+
 
 # =========================================================
 # 1) 예시 데이터 생성 (물리적 일관성 유지)
 # =========================================================
 def make_example(I=6, J=12, seed=7):
-    """
-    - 드론 base, 작업 위치를 2D 평면에 난수 배치
+    """- 드론 base, 작업 위치를 2D 평면에 난수 배치
     - d_{ij}: 왕복거리(km)
     - e_{ij}: κ_i·d_{ij} + e_hover_j  (Wh)  # 선형 근사
     - Emax_i: 드론 i의 가용 배터리(Wh)
@@ -90,8 +89,7 @@ def build_and_solve_milp(
     sigma=0.2, normalize=True,
     time_limit=10.0, mip_rel_gap=1e-3, presolve=True
 ):
-    """
-    입력:
+    """입력:
       • d,e,Emax,w,A,Q,alpha,beta,gamma,rho,sigma (위에 정의된 의미와 동일)
     출력:
       • (res, dict) : SciPy 결과(res)와 진단을 위한 모든 중간물(diag) 딕셔너리
