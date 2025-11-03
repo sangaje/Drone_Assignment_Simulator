@@ -218,6 +218,8 @@ class Simulator(ABC, Generic[V, T]):
     _task_time_std: Text
     _max_vehicle_utilization: Text
 
+    _dt: Time
+
 
     def __init__(self):
         """Initialize a new Simulator instance.
@@ -376,7 +378,7 @@ class Simulator(ABC, Generic[V, T]):
             console=CONSOLE,
             auto_refresh=True,
         ) as progress:
-            panel = self._init_sim(progress, dataset_path, key, j)
+            panel = self._init_sim(progress, dataset_path, key, j, dt)
             try:
                 self._sim_loop(progress, batch_size, dt, key, panel)
             except Exception:
@@ -390,10 +392,12 @@ class Simulator(ABC, Generic[V, T]):
         progress: Progress,
         dataset_path: str,
         key: Callable[[T], _SupportsRichComparisonT] | None,
-        j: int = 1,
+        j: int,
+        dt: Time
     ) -> Panel:
         init_msg = "[green]Initializing Simulation..."
         p = progress.add_task(init_msg, total=4)
+        self._dt = dt
         self._init_queues()
         self._temp_task_texts = {}
         self._temp_vehicle_texts = {}
@@ -650,9 +654,10 @@ class Simulator(ABC, Generic[V, T]):
 
 
 
-    def failed_to_assign_task(self, task: T):
+    def failed_to_assign_task(self, task: T, dt: Time = None):
         self._temp_working_tasks_queue.remove(task)
-        task.priority += 0.1
+        if dt is not None:
+            task.priority += (0.05/60) * float(dt)
         self._temp_cooldown_tasks_queue.append(task)
 
 
