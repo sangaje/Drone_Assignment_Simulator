@@ -888,4 +888,4 @@ class Drone(Vehicle, Generic[T]):
         """
         return (self._tasks_current and len(self._tasks_current) > 0) or len(self.task_queue) > 0
 
-    
+
