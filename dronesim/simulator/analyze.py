@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import pandas as pd
 
+
 def convert_traffic_level(congestion):
     """Convert traffic level to numeric value (0.0-1.0)
     
@@ -16,12 +17,12 @@ def convert_traffic_level(congestion):
     if isinstance(congestion, str):
         level_map = {
             "low": 0.2,
-            "medium": 0.5, 
+            "medium": 0.5,
             "high": 0.7,
             "jam": 0.9
         }
         return level_map.get(congestion.lower(), None)
-    elif isinstance(congestion, (int, float)) and 0.0 <= congestion <= 1.0:
+    if isinstance(congestion, (int, float)) and 0.0 <= congestion <= 1.0:
         return float(congestion)
     return None
 
@@ -44,7 +45,6 @@ def analyze_task_processing_times(
     Returns:
         pandas.DataFrame: 10-min binned stats (seconds-based μ/σ) filtered by n>0
     """
-
     print("=== Task Processing Time Analysis ===")
     print(f"Input data points: {len(task_data_list)}")
 
@@ -202,11 +202,11 @@ def analyze_task_processing_times(
     if traffic_df is not None and ax2 is not None:
         # Resample traffic data to match time periods
         traffic_resampled = traffic_df.resample("30min").mean()
-        
+
         # Create x positions for line chart
         x_positions = list(range(len(period_labels)))
         traffic_values = []
-        
+
         # Align traffic data with processing time periods
         for period_str in period_labels:
             period_dt = datetime.strptime(period_str, "%H:%M").time()
@@ -216,28 +216,28 @@ def analyze_task_processing_times(
                 if traffic_time.time().replace(second=0, microsecond=0) == period_dt:
                     matching_traffic = traffic_resampled.loc[traffic_time, 'congestion']
                     break
-            
+
             if matching_traffic is not None:
                 traffic_values.append(matching_traffic)
             else:
                 traffic_values.append(0.0)  # Default to no congestion if no data
-        
+
         # Plot traffic congestion as line chart
-        ax2.plot(x_positions, traffic_values, linewidth=2, marker='o', 
+        ax2.plot(x_positions, traffic_values, linewidth=2, marker='o',
                 markersize=4, color='red', alpha=0.7, label='Traffic Congestion')
         ax2.fill_between(x_positions, traffic_values, alpha=0.3, color='red')
-        
+
         ax2.set_ylabel("Traffic\nCongestion", fontsize=10)
         ax2.set_xlabel("Time Period", fontsize=12)
         ax2.set_ylim(0, 1)
         ax2.set_xticks(x_positions)
         ax2.set_xticklabels(period_labels)
         ax2.grid(True, alpha=0.3)
-        
+
         # x축 레이블 회전
         if len(period_labels) > 8:
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
+
         # Add congestion level indicators
         ax2.axhline(y=0.3, color='green', linestyle='--', alpha=0.5, label='Low (30%)')
         ax2.axhline(y=0.7, color='orange', linestyle='--', alpha=0.5, label='High (70%)')
@@ -442,21 +442,21 @@ def analyze_task_processing_speed(
         # Plot traffic congestion as line chart
         traffic_resampled = traffic_df.resample("30min").mean()
         traffic_times = [t.strftime("%H:%M") for t in traffic_resampled.index]
-        
-        ax2.plot(traffic_times, traffic_resampled['congestion'], 
+
+        ax2.plot(traffic_times, traffic_resampled['congestion'],
                 color='red', linewidth=2, marker='o', markersize=4, alpha=0.7)
-        ax2.fill_between(traffic_times, traffic_resampled['congestion'], 
+        ax2.fill_between(traffic_times, traffic_resampled['congestion'],
                         alpha=0.3, color='red')
-        
+
         ax2.set_ylabel("Traffic\nCongestion", fontsize=10)
         ax2.set_xlabel("Time Period", fontsize=12)
         ax2.set_ylim(0, 1)
         ax2.grid(True, alpha=0.3)
-        
+
         # x축 레이블 회전
         if len(traffic_times) > 8:
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
+
         # Add congestion level indicators
         ax2.axhline(y=0.3, color='green', linestyle='--', alpha=1.5, label='Low')
         ax2.axhline(y=0.7, color='orange', linestyle='--', alpha=0.5, label='High')
@@ -498,7 +498,6 @@ def analyze_vehicle_battery_consumption(
     Returns:
         pandas.DataFrame: 30-min binned stats (Wh-based μ/σ) filtered by n>0
     """
-
     print("=== Vehicle Battery Consumption Analysis ===")
     print(f"Input data points: {len(vehicle_data_list)}")
 
@@ -647,16 +646,16 @@ def analyze_vehicle_battery_consumption(
     main_ax.legend(loc='upper right')
 
     # ---------------------------
-    # Add traffic congestion line chart if data is available  
+    # Add traffic congestion line chart if data is available
     # ---------------------------
     if traffic_df is not None and ax2 is not None:
         # Resample traffic data to match time periods
         traffic_resampled = traffic_df.resample("30min").mean()
-        
+
         # Create x positions for line chart
         x_positions = list(range(len(period_labels)))
         traffic_values = []
-        
+
         # Align traffic data with battery consumption periods
         for period_str in period_labels:
             period_dt = datetime.strptime(period_str, "%H:%M").time()
@@ -666,28 +665,28 @@ def analyze_vehicle_battery_consumption(
                 if traffic_time.time().replace(second=0, microsecond=0) == period_dt:
                     matching_traffic = traffic_resampled.loc[traffic_time, 'congestion']
                     break
-            
+
             if matching_traffic is not None:
                 traffic_values.append(matching_traffic)
             else:
                 traffic_values.append(0.0)  # Default to no congestion if no data
-        
+
         # Plot traffic congestion as line chart with road traffic style
-        ax2.plot(x_positions, traffic_values, linewidth=2, marker='o', 
+        ax2.plot(x_positions, traffic_values, linewidth=2, marker='o',
                 markersize=4, color='red', alpha=0.8, label='Traffic Congestion')
         ax2.fill_between(x_positions, traffic_values, alpha=0.3, color='red')
-        
+
         ax2.set_ylabel("Traffic\nCongestion", fontsize=10)
         ax2.set_xlabel("Time Period", fontsize=12)
         ax2.set_ylim(0, 1)
         ax2.set_xticks(x_positions)
         ax2.set_xticklabels(period_labels)
         ax2.grid(True, linewidth=0.5, alpha=0.5)
-        
+
         # x축 레이블 회전
         if len(period_labels) > 8:
             plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
+
         # Add congestion level indicators (road traffic share style)
         ax2.axhline(y=0.3, color='green', linestyle='--', alpha=0.5, label='Low Traffic')
         ax2.axhline(y=0.7, color='orange', linestyle='--', alpha=0.5, label='Heavy Traffic')

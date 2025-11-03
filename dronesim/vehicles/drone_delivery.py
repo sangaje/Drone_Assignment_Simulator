@@ -283,6 +283,16 @@ class DeliveryDrone(Drone[DeliveryTask]):
         self._start_travel_time = None
         self.battery_usage_history = []
 
+    def _get_nearest_base(self, last_point: GeoPoint | None = None) -> GeoPoint:
+        if last_point is None:
+            k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
+        else:
+            k, v = min(self.base_pos.items(), key = lambda t: last_point.distance_to(t[1]))
+
+        return v
+
+
+
     def _try_assign_new_destination(self, now: Time) -> None:
         """Execute intelligent destination assignment using state-aware route optimization.
 
@@ -391,7 +401,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
         """
         if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
             if not self.is_operational() or not self._is_on_base:
-                k, v = min(self.base_pos.items(), key = lambda t: self.position.distance_to(t[1]))
+                v = self._get_nearest_base()
                 self.current_destination = v
                 self._is_going_to_base = True
                 self._start_flight(now)
@@ -443,8 +453,8 @@ class DeliveryDrone(Drone[DeliveryTask]):
                     drop_off_points.append(task.destination)
 
         else:
-            if len(self.task_queue) == 0:
-                return Kilometer(0), self.position
+            if len(self.task_queue) == 0 and new_task is None:
+                return self._get_nearest_base().distance_to(self.position), self.position
 
         pick_up_points.sort(key=lambda t: self.position.distance_to(t))
         if len(pick_up_points) > 0:
@@ -476,11 +486,17 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
         route += new_pick_up_points + new_drop_off_points
+        route += [self._get_nearest_base(route[-1])]
 
         total_distance: Length = Kilometer(0)
 
+        prev_point: GeoPoint = None
         for point in route:
-            total_distance += self.position.distance_to(point)
+            if prev_point is None:
+                total_distance += self.position.distance_to(point)
+            else:
+                total_distance += prev_point.distance_to(point)
+            prev_point = point
 
         return total_distance, route[-1]
 

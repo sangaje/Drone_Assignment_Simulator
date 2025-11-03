@@ -207,6 +207,8 @@ class Simulator(ABC, Generic[V, T]):
     _pending_tasks_queue: deque[T]
     _working_tasks_queue: deque[T]
     _completed_tasks_queue: deque[T]
+    _cooldown_tasks_queue: deque[T]
+    _temp_cooldown_tasks_queue: list[T]
     _executor: ThreadPoolExecutor
 
     _temp_task_texts: dict[State, Text]
@@ -214,6 +216,7 @@ class Simulator(ABC, Generic[V, T]):
     _task_time_mean: Text
     _task_time_std: Text
     _max_vehicle_utilization: Text
+
 
     def __init__(self):
         """Initialize a new Simulator instance.
@@ -238,6 +241,8 @@ class Simulator(ABC, Generic[V, T]):
         self._pending_tasks_queue = deque()
         self._working_tasks_queue = deque()
         self._completed_tasks_queue = deque()
+        self._cooldown_tasks_queue = deque()
+        self._temp_cooldown_tasks_queue = []
 
     def _init_thread_pool_executor(self, progress: Progress, j: int):
         init_msg = "[green]Initializing Thread Pool Executor..."
@@ -405,6 +410,7 @@ class Simulator(ABC, Generic[V, T]):
         self._operational_vehicles = Text("0%")
 
         self._pending_queue = Text("0")
+        self._cooldown_queue = Text("0")
         self._working_queue = Text("0")
         self._completed_queue = Text("0")
 
@@ -429,6 +435,7 @@ class Simulator(ABC, Generic[V, T]):
 
         t.add_section()
         t.add_row("[b]Pending Queue Size[/b]: ", self._pending_queue)
+        t.add_row("[b]Cooldown Queue Size[/b]: ", self._cooldown_queue)
         t.add_row("[b]Working Queue Size[/b]: ", self._working_queue)
         t.add_row("[b]Completed Queue Size[/b]: ", self._completed_queue)
 
@@ -583,8 +590,18 @@ class Simulator(ABC, Generic[V, T]):
             self._operational_vehicles.plain = f"{opreational_perventage:.1f}%"
 
             self._pending_queue.plain = str(len(self._pending_tasks_queue))
+            self._cooldown_queue.plain = str(len(self._cooldown_tasks_queue))
             self._working_queue.plain = str(len(self._working_tasks_queue))
             self._completed_queue.plain = str(len(self._completed_tasks_queue))
+
+        def reassign_cooldown_tasks():
+            self._temp_cooldown_tasks_queue.sort(key= lambda t: t.start_at)
+
+            for task in self._temp_cooldown_tasks_queue:
+                self._cooldown_tasks_queue.append(task)
+                self._progress.advance(self._t_working, -1)
+
+            self._temp_cooldown_tasks_queue.clear()
 
         with Live(panel, console=CONSOLE, auto_refresh=True) as _:
             while not self.done:
@@ -597,6 +614,7 @@ class Simulator(ABC, Generic[V, T]):
                 do_task_update()
                 progress.update(t, description=f"[green]Simulation Time: {now}")
                 refresh_state_counts()
+                reassign_cooldown_tasks()
 
                 now += dt
 
@@ -606,16 +624,23 @@ class Simulator(ABC, Generic[V, T]):
         Returns:
             Sequence[T]: A sequence of pending tasks currently in the simulation.
         """
+        while len(self._cooldown_tasks_queue) > 0:
+            task = self._cooldown_tasks_queue.popleft()
+            self._working_tasks_queue.append(task)
+            self._progress.advance(self._t_working)
+            yield task
+
         while len(self._pending_tasks_queue) > 0:
             self._progress.advance(self._t_working)
             task = self._pending_tasks_queue.popleft()
             self._working_tasks_queue.append(task)
             yield task
 
+
+
     def failed_to_assign_task(self, task: T):
-        self._pending_tasks_queue.appendleft(task)
         self._working_tasks_queue.pop()
-        self._progress.advance(self._t_working, -1)
+        self._temp_cooldown_tasks_queue.append(task)
 
 
     def get_tasks(self) -> Sequence[T]:

@@ -3,25 +3,26 @@ from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import pandas as pd
 
+
 def convert_traffic_level(congestion):
-    """Convert traffic level to numeric value (0.0-1.0)
+    """Convert traffic level to numeric value (1-4)
     
     Args:
         congestion: String level ("low"/"medium"/"high"/"jam", case-insensitive) 
-                   or numeric value (0.0-1.0)
+                   or numeric value (1-4)
     
     Returns:
-        float: Numeric congestion level (0.0-1.0) or None if invalid
+        float: Numeric congestion level (1=low, 2=medium, 3=high, 4=jam) or None if invalid
     """
     if isinstance(congestion, str):
         level_map = {
-            "low": 0.2,
-            "medium": 0.5, 
-            "high": 0.7,
-            "jam": 0.9
+            "low": 1,
+            "medium": 2,
+            "high": 3,
+            "jam": 4
         }
         return level_map.get(congestion.lower(), None)
-    elif isinstance(congestion, (int, float)) and 0.0 <= congestion <= 1.0:
+    if isinstance(congestion, (int, float)) and 1 <= congestion <= 4:
         return float(congestion)
     return None
 
@@ -39,12 +40,11 @@ def analyze_task_processing_times(
         traffic_data_list: Optional. List of dictionaries with keys:
                           - 'start_time': datetime or float (seconds from base time)
                           - 'congestion_level': string ("low"/"medium"/"high"/"jam", case-insensitive) 
-                                             OR float (0.0-1.0)
+                                             OR float (1-4)
 
     Returns:
         pandas.DataFrame: 10-min binned stats (seconds-based μ/σ) filtered by n>0
     """
-
     print("=== Task Processing Time Analysis ===")
     print(f"Input data points: {len(task_data_list)}")
 
@@ -161,13 +161,8 @@ def analyze_task_processing_times(
         if traffic_processed_data:
             traffic_df = pd.DataFrame(traffic_processed_data).set_index("start_time").sort_index()
 
-    # Create subplot layout: main plot + optional traffic overlay
-    if traffic_df is not None:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), height_ratios=[3, 1], sharex=True)
-        main_ax = ax1
-    else:
-        fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
-        ax2 = None
+    # Create single plot
+    fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
 
     # Boxplot 생성
     bp = main_ax.boxplot(processing_time_data, labels=period_labels, patch_artist=True,
@@ -181,33 +176,23 @@ def analyze_task_processing_times(
 
     # 제목/레이블
     main_ax.set_title(f"{title} - Processing Time Distribution (30-min intervals)", fontsize=14)
-    if traffic_df is None:
-        main_ax.set_xlabel("Time Period", fontsize=12)
+    main_ax.set_xlabel("Time Period", fontsize=12)
     main_ax.set_ylabel("Processing Time (minutes)", fontsize=12)
 
     # 격자 및 축 포맷
     main_ax.grid(True, alpha=0.3, axis='y')
 
-    # x축 레이블 회전 (너무 많으면)
-    if len(period_labels) > 8 and traffic_df is None:
-        plt.xticks(rotation=45)
-
-    # 범례 추가 (평균선과 중앙값선 설명)
-    main_ax.plot([], [], color='red', linewidth=2, label='Mean')
-    main_ax.plot([], [], color='darkgreen', linewidth=2, label='Median')
-    main_ax.legend(loc='upper right')
-
     # ---------------------------
-    # Add traffic congestion stacked area chart if data is available
+    # Add traffic congestion line on secondary y-axis if data is available
     # ---------------------------
-    if traffic_df is not None and ax2 is not None:
+    if traffic_df is not None:
         # Resample traffic data to match time periods
         traffic_resampled = traffic_df.resample("30min").mean()
-        
-        # Create x positions for chart
-        x_positions = list(range(len(period_labels)))
+
+        # Create x positions for line plot
+        x_positions = list(range(1, len(period_labels) + 1))
         traffic_values = []
-        
+
         # Align traffic data with processing time periods
         for period_str in period_labels:
             period_dt = datetime.strptime(period_str, "%H:%M").time()
@@ -217,65 +202,45 @@ def analyze_task_processing_times(
                 if traffic_time.time().replace(second=0, microsecond=0) == period_dt:
                     matching_traffic = traffic_resampled.loc[traffic_time, 'congestion']
                     break
-            
+
             if matching_traffic is not None:
                 traffic_values.append(matching_traffic)
             else:
-                traffic_values.append(0.2)  # Default to low traffic if no data
-        
-        # Define color mapping for traffic levels
-        colors = {
-            'low': '#1f77b4',      # Blue
-            'medium': '#ff7f0e',   # Orange  
-            'high': '#2ca02c',     # Green
-            'jam': '#d62728'       # Red
-        }
-        
-        # Create stacked area chart based on traffic levels
-        for i, x_pos in enumerate(x_positions):
-            congestion_level = traffic_values[i]
-            
-            # Determine traffic level and color
-            if congestion_level <= 0.35:
-                level = 'low'
-                color = colors['low']
-            elif congestion_level <= 0.6:
-                level = 'medium' 
-                color = colors['medium']
-            elif congestion_level <= 0.8:
-                level = 'high'
-                color = colors['high']
-            else:
-                level = 'jam'
-                color = colors['jam']
-            
-            # Draw bar for this time period (100% height, colored by level)
-            ax2.bar(x_pos, 1.0, width=0.8, color=color, alpha=0.7, 
-                   edgecolor='white', linewidth=0.5)
-        
-        ax2.set_ylabel("Traffic\nLevel", fontsize=10)
-        ax2.set_xlabel("Time Period", fontsize=12)
-        ax2.set_ylim(0, 1)
-        ax2.set_xticks(x_positions)
-        ax2.set_xticklabels(period_labels)
-        ax2.grid(True, alpha=0.3, axis='x')
-        
-        # x축 레이블 회전
-        if len(period_labels) > 8:
-            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
-        # Create legend with level colors
-        from matplotlib.patches import Patch
-        legend_elements = [
-            Patch(facecolor=colors['low'], label='Low'),
-            Patch(facecolor=colors['medium'], label='Medium'),
-            Patch(facecolor=colors['high'], label='High'),
-            Patch(facecolor=colors['jam'], label='Jam')
-        ]
-        ax2.legend(handles=legend_elements, loc='upper right', fontsize=8)
-        
-        # Remove y-axis ticks since it's categorical
-        ax2.set_yticks([])
+                traffic_values.append(1)  # Default to low traffic if no data
+
+        # Create secondary y-axis for traffic
+        ax_traffic = main_ax.twinx()
+
+        # Plot traffic line
+        line_traffic = ax_traffic.plot(x_positions, traffic_values,
+                                       color='orange', linewidth=2.5,
+                                       marker='o', markersize=6,
+                                       label='Traffic Level', alpha=0.8, zorder=5)
+
+        # Set secondary y-axis properties
+        ax_traffic.set_ylabel("Traffic Congestion Level (1-4)", fontsize=12, color='orange')
+        ax_traffic.set_ylim(0, 5)
+        ax_traffic.tick_params(axis='y', labelcolor='orange')
+        ax_traffic.grid(False)
+
+        # Combined legend
+        lines1 = [plt.Line2D([0], [0], color='red', linewidth=2, label='Mean'),
+                  plt.Line2D([0], [0], color='darkgreen', linewidth=2, label='Median')]
+        lines2 = line_traffic
+
+        all_lines = lines1 + lines2
+        labels = [l.get_label() for l in all_lines]
+        main_ax.legend(all_lines, labels, loc='upper left', fontsize=10)
+    else:
+        # 범례 추가 (평균선과 중앙값선 설명)
+        main_ax.plot([], [], color='red', linewidth=2, label='Mean')
+        main_ax.plot([], [], color='darkgreen', linewidth=2, label='Median')
+        main_ax.legend(loc='upper right')
+
+    # x축 레이블 회전 (항상 45도 회전)
+    for label in main_ax.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha('right')
 
     plt.tight_layout()
     return stats_filtered
@@ -295,7 +260,7 @@ def analyze_task_processing_speed(
         traffic_data_list: Optional. List of dictionaries with keys:
                           - 'start_time': datetime or float (seconds from base time)
                           - 'congestion_level': string ("low"/"medium"/"high"/"jam", case-insensitive)
-                                             OR float (0.0-1.0)
+                                             OR float (1-4)
                           OR list of tuples (start_time, congestion_level)
 
     Returns:
@@ -416,13 +381,8 @@ def analyze_task_processing_speed(
         print("No data available for plotting.")
         return stats_filtered
 
-    # Create subplot layout: main plot + optional traffic overlay
-    if traffic_df is not None:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), height_ratios=[3, 1], sharex=True)
-        main_ax = ax1
-    else:
-        fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
-        ax2 = None
+    # Create single plot
+    fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
 
     # Boxplot 생성
     bp = main_ax.boxplot(speed_data, labels=period_labels, patch_artist=True,
@@ -436,33 +396,23 @@ def analyze_task_processing_speed(
 
     # 제목/레이블
     main_ax.set_title(f"{title} - Speed Distribution (30-min intervals)", fontsize=14)
-    if traffic_df is None:
-        main_ax.set_xlabel("Time Period", fontsize=12)
+    main_ax.set_xlabel("Time Period", fontsize=12)
     main_ax.set_ylabel("Speed (km/h)", fontsize=12)
 
     # 격자 및 축 포맷
     main_ax.grid(True, alpha=0.3, axis='y')
 
-    # x축 레이블 회전 (너무 많으면)
-    if len(period_labels) > 8 and traffic_df is None:
-        plt.xticks(rotation=45)
-
-    # 범례 추가 (평균선과 중앙값선 설명)
-    main_ax.plot([], [], color='red', linewidth=2, label='Mean')
-    main_ax.plot([], [], color='darkblue', linewidth=2, label='Median')
-    main_ax.legend(loc='upper right')
-
     # ---------------------------
-    # Add traffic congestion stacked area chart if data is available
+    # Add traffic congestion line on secondary y-axis if data is available
     # ---------------------------
-    if traffic_df is not None and ax2 is not None:
+    if traffic_df is not None:
         # Resample traffic data to match time periods
         traffic_resampled = traffic_df.resample("30min").mean()
-        
-        # Create x positions for chart
-        x_positions = list(range(len(period_labels)))
+
+        # Create x positions for line plot
+        x_positions = list(range(1, len(period_labels) + 1))
         traffic_values = []
-        
+
         # Align traffic data with speed periods
         for period_str in period_labels:
             period_dt = datetime.strptime(period_str, "%H:%M").time()
@@ -472,65 +422,45 @@ def analyze_task_processing_speed(
                 if traffic_time.time().replace(second=0, microsecond=0) == period_dt:
                     matching_traffic = traffic_resampled.loc[traffic_time, 'congestion']
                     break
-            
+
             if matching_traffic is not None:
                 traffic_values.append(matching_traffic)
             else:
-                traffic_values.append(0.2)  # Default to low traffic if no data
-        
-        # Define color mapping for traffic levels
-        colors = {
-            'low': '#1f77b4',      # Blue
-            'medium': '#ff7f0e',   # Orange  
-            'high': '#2ca02c',     # Green
-            'jam': '#d62728'       # Red
-        }
-        
-        # Create stacked area chart based on traffic levels
-        for i, x_pos in enumerate(x_positions):
-            congestion_level = traffic_values[i]
-            
-            # Determine traffic level and color
-            if congestion_level <= 0.35:
-                level = 'low'
-                color = colors['low']
-            elif congestion_level <= 0.6:
-                level = 'medium' 
-                color = colors['medium']
-            elif congestion_level <= 0.8:
-                level = 'high'
-                color = colors['high']
-            else:
-                level = 'jam'
-                color = colors['jam']
-            
-            # Draw bar for this time period (100% height, colored by level)
-            ax2.bar(x_pos, 1.0, width=0.8, color=color, alpha=0.7, 
-                   edgecolor='white', linewidth=0.5)
-        
-        ax2.set_ylabel("Traffic\nLevel", fontsize=10)
-        ax2.set_xlabel("Time Period", fontsize=12)
-        ax2.set_ylim(0, 1)
-        ax2.set_xticks(x_positions)
-        ax2.set_xticklabels(period_labels)
-        ax2.grid(True, alpha=0.3, axis='x')
-        
-        # x축 레이블 회전
-        if len(period_labels) > 8:
-            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
-        # Create legend with level colors
-        from matplotlib.patches import Patch
-        legend_elements = [
-            Patch(facecolor=colors['low'], label='Low'),
-            Patch(facecolor=colors['medium'], label='Medium'),
-            Patch(facecolor=colors['high'], label='High'),
-            Patch(facecolor=colors['jam'], label='Jam')
-        ]
-        ax2.legend(handles=legend_elements, loc='upper right', fontsize=8)
-        
-        # Remove y-axis ticks since it's categorical
-        ax2.set_yticks([])
+                traffic_values.append(1)  # Default to low traffic if no data
+
+        # Create secondary y-axis for traffic
+        ax_traffic = main_ax.twinx()
+
+        # Plot traffic line
+        line_traffic = ax_traffic.plot(x_positions, traffic_values,
+                                       color='orange', linewidth=2.5,
+                                       marker='o', markersize=6,
+                                       label='Traffic Level', alpha=0.8, zorder=5)
+
+        # Set secondary y-axis properties
+        ax_traffic.set_ylabel("Traffic Congestion Level (1-4)", fontsize=12, color='orange')
+        ax_traffic.set_ylim(0, 5)
+        ax_traffic.tick_params(axis='y', labelcolor='orange')
+        ax_traffic.grid(False)
+
+        # Combined legend
+        lines1 = [plt.Line2D([0], [0], color='red', linewidth=2, label='Mean'),
+                  plt.Line2D([0], [0], color='darkblue', linewidth=2, label='Median')]
+        lines2 = line_traffic
+
+        all_lines = lines1 + lines2
+        labels = [l.get_label() for l in all_lines]
+        main_ax.legend(all_lines, labels, loc='upper left', fontsize=10)
+    else:
+        # 범례 추가 (평균선과 중앙값선 설명)
+        main_ax.plot([], [], color='red', linewidth=2, label='Mean')
+        main_ax.plot([], [], color='darkblue', linewidth=2, label='Median')
+        main_ax.legend(loc='upper right')
+
+    # x축 레이블 회전 (항상 45도 회전)
+    for label in main_ax.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha('right')
 
     plt.tight_layout()
     return stats_filtered
@@ -550,12 +480,11 @@ def analyze_vehicle_battery_consumption(
         traffic_data_list: Optional. List of dictionaries with keys:
                           - 'start_time': datetime or float (seconds from base time)
                           - 'congestion_level': string ("low"/"medium"/"high"/"jam", case-insensitive)
-                                             OR float (0.0-1.0)
+                                             OR float (1-4)
 
     Returns:
         pandas.DataFrame: 30-min binned stats (Wh-based μ/σ) filtered by n>0
     """
-
     print("=== Vehicle Battery Consumption Analysis ===")
     print(f"Input data points: {len(vehicle_data_list)}")
 
@@ -668,13 +597,8 @@ def analyze_vehicle_battery_consumption(
         if traffic_processed_data:
             traffic_df = pd.DataFrame(traffic_processed_data).set_index("start_time").sort_index()
 
-    # Create subplot layout: main plot + optional traffic overlay
-    if traffic_df is not None:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), height_ratios=[3, 1], sharex=True)
-        main_ax = ax1
-    else:
-        fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
-        ax2 = None
+    # Create single plot
+    fig, main_ax = plt.subplots(1, 1, figsize=(12, 6))
 
     # Boxplot 생성
     bp = main_ax.boxplot(battery_data, labels=period_labels, patch_artist=True,
@@ -688,33 +612,23 @@ def analyze_vehicle_battery_consumption(
 
     # 제목/레이블
     main_ax.set_title(f"{title} - Battery Consumption Distribution (30-min intervals)", fontsize=14)
-    if traffic_df is None:
-        main_ax.set_xlabel("Time Period", fontsize=12)
+    main_ax.set_xlabel("Time Period", fontsize=12)
     main_ax.set_ylabel("Battery Consumption (Wh)", fontsize=12)
 
     # 격자 및 축 포맷
     main_ax.grid(True, alpha=0.3, axis='y')
 
-    # x축 레이블 회전 (너무 많으면)
-    if len(period_labels) > 8 and traffic_df is None:
-        plt.xticks(rotation=45)
-
-    # 범례 추가 (평균선과 중앙값선 설명)
-    main_ax.plot([], [], color='red', linewidth=2, label='Mean')
-    main_ax.plot([], [], color='darkred', linewidth=2, label='Median')
-    main_ax.legend(loc='upper right')
-
     # ---------------------------
-    # Add traffic congestion stacked area chart if data is available  
+    # Add traffic congestion line on secondary y-axis if data is available
     # ---------------------------
-    if traffic_df is not None and ax2 is not None:
+    if traffic_df is not None:
         # Resample traffic data to match time periods
         traffic_resampled = traffic_df.resample("30min").mean()
-        
-        # Create x positions for chart
-        x_positions = list(range(len(period_labels)))
+
+        # Create x positions for line plot
+        x_positions = list(range(1, len(period_labels) + 1))
         traffic_values = []
-        
+
         # Align traffic data with battery consumption periods
         for period_str in period_labels:
             period_dt = datetime.strptime(period_str, "%H:%M").time()
@@ -724,65 +638,45 @@ def analyze_vehicle_battery_consumption(
                 if traffic_time.time().replace(second=0, microsecond=0) == period_dt:
                     matching_traffic = traffic_resampled.loc[traffic_time, 'congestion']
                     break
-            
+
             if matching_traffic is not None:
                 traffic_values.append(matching_traffic)
             else:
-                traffic_values.append(0.2)  # Default to low traffic if no data
-        
-        # Define color mapping for traffic levels
-        colors = {
-            'low': '#1f77b4',      # Blue
-            'medium': '#ff7f0e',   # Orange  
-            'high': '#2ca02c',     # Green
-            'jam': '#d62728'       # Red
-        }
-        
-        # Create stacked area chart based on traffic levels
-        for i, x_pos in enumerate(x_positions):
-            congestion_level = traffic_values[i]
-            
-            # Determine traffic level and color
-            if congestion_level <= 0.35:
-                level = 'low'
-                color = colors['low']
-            elif congestion_level <= 0.6:
-                level = 'medium' 
-                color = colors['medium']
-            elif congestion_level <= 0.8:
-                level = 'high'
-                color = colors['high']
-            else:
-                level = 'jam'
-                color = colors['jam']
-            
-            # Draw bar for this time period (100% height, colored by level)
-            ax2.bar(x_pos, 1.0, width=0.8, color=color, alpha=0.7, 
-                   edgecolor='white', linewidth=0.5)
-        
-        ax2.set_ylabel("Traffic\nLevel", fontsize=10)
-        ax2.set_xlabel("Time Period", fontsize=12)
-        ax2.set_ylim(0, 1)
-        ax2.set_xticks(x_positions)
-        ax2.set_xticklabels(period_labels)
-        ax2.grid(True, alpha=0.3, axis='x')
-        
-        # x축 레이블 회전
-        if len(period_labels) > 8:
-            plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        
-        # Create legend with level colors
-        from matplotlib.patches import Patch
-        legend_elements = [
-            Patch(facecolor=colors['low'], label='Low'),
-            Patch(facecolor=colors['medium'], label='Medium'),
-            Patch(facecolor=colors['high'], label='High'),
-            Patch(facecolor=colors['jam'], label='Jam')
-        ]
-        ax2.legend(handles=legend_elements, loc='upper right', fontsize=8)
-        
-        # Remove y-axis ticks since it's categorical
-        ax2.set_yticks([])
+                traffic_values.append(1)  # Default to low traffic if no data
+
+        # Create secondary y-axis for traffic
+        ax_traffic = main_ax.twinx()
+
+        # Plot traffic line
+        line_traffic = ax_traffic.plot(x_positions, traffic_values,
+                                       color='orange', linewidth=2.5,
+                                       marker='o', markersize=6,
+                                       label='Traffic Level', alpha=0.8, zorder=5)
+
+        # Set secondary y-axis properties
+        ax_traffic.set_ylabel("Traffic Congestion Level (1-4)", fontsize=12, color='orange')
+        ax_traffic.set_ylim(0, 5)
+        ax_traffic.tick_params(axis='y', labelcolor='orange')
+        ax_traffic.grid(False)
+
+        # Combined legend
+        lines1 = [plt.Line2D([0], [0], color='red', linewidth=2, label='Mean'),
+                  plt.Line2D([0], [0], color='darkred', linewidth=2, label='Median')]
+        lines2 = line_traffic
+
+        all_lines = lines1 + lines2
+        labels = [l.get_label() for l in all_lines]
+        main_ax.legend(all_lines, labels, loc='upper left', fontsize=10)
+    else:
+        # 범례 추가 (평균선과 중앙값선 설명)
+        main_ax.plot([], [], color='red', linewidth=2, label='Mean')
+        main_ax.plot([], [], color='darkred', linewidth=2, label='Median')
+        main_ax.legend(loc='upper right')
+
+    # x축 레이블 회전 (항상 45도 회전)
+    for label in main_ax.get_xticklabels():
+        label.set_rotation(45)
+        label.set_ha('right')
 
     plt.tight_layout()
     return stats_filtered
