@@ -797,7 +797,8 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self._current_mission = None
 
     def can_accept_task(self) -> bool:
-        c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+        # c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
+        c1 = True
         c2 = not self._is_going_to_base
         return c1 and c2
 
