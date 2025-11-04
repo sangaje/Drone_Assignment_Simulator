@@ -858,8 +858,9 @@ class Simulator(ABC, Generic[V, T]):
         is_all_tasks_pending = len(self._tasks_queue) == 0
         is_all_tasks_working_out = len(self._pending_tasks_queue) == 0
         is_all_tasks_completed = len(self._working_tasks_queue) == 0
+        is_all_tasks_taken = len(self._cooldown_tasks_queue) == 0
         return (
-            is_all_tasks_pending and is_all_tasks_working_out and is_all_tasks_completed
+            is_all_tasks_pending and is_all_tasks_working_out and is_all_tasks_completed and is_all_tasks_taken
         )
 
     def _shutdown_executor(self, hard_shutdown: bool = False):

@@ -1,4 +1,3 @@
-import sys
 streams = 5
 total_requests = 10_000
 stride = 4096
