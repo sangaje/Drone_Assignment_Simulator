@@ -829,7 +829,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def is_operational(self):
         c1 = self._is_going_to_base or self._is_on_base
-        c2 = len(self.current_tasks) == 0 and len(self.task_queue) < 2
+        c2 = len(self.current_tasks) == 0 and len(self.task_queue) == 0
         return c1 and c2
 
     @property
