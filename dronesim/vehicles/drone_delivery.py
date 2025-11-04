@@ -826,24 +826,11 @@ class DeliveryDrone(Drone[DeliveryTask]):
         c2 = not self._is_going_to_base
         return c1 and c2
 
-    def assign(self, task):
-        if self.can_accept_task():
-            distance = float(self.route_remainder(task)[0])
-            battery_usage = distance * float(
-                self.power_transit
-            ) / float(self.velocity)
-
-
-            next_battery = float(self.battery.current) - battery_usage
-            if 100 * next_battery / float(self.battery.capacity) < self.operational_battery_percentage:
-                return False
-
-
-            return super().assign(task)
-        return False
 
     def is_operational(self):
-        return super().is_operational() and not self._is_going_to_base
+        c1 = self._is_going_to_base or self._is_on_base
+        c2 = len(self.current_tasks) == 0 and len(self.task_queue) == 0
+        return c1 and c2
 
     @property
     def is_busy(self) -> bool:
