@@ -495,11 +495,11 @@ class Simulator(ABC, Generic[V, T]):
                 print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_vehicle_update(start: int, end: int, dt: Time, now: Time):
-            try:
+            # try:
                 for i in range(start, end):
                     self._vehicles[i].vehicle_update(dt, now)
-            except Exception as e:
-                print(f"Error during vehicle update in range ({start}, {end}): {e}")
+            # except Exception as e:
+            #     print(f"Error during vehicle update in range ({start}, {end}): {e}")
 
         def do_refresh_timer(start: int, end: int, dt: Time, now: Time):
             try:
@@ -562,7 +562,7 @@ class Simulator(ABC, Generic[V, T]):
                 vehicle_state_counts[vehicle.current_state] += 1
                 if vehicle.is_busy:
                     vehicle_usage += 1
-                if vehicle.is_operational():
+                if vehicle.can_accept_task():
                     vehicle_oprational += 1
 
             for state, text in self._temp_vehicle_texts.items():

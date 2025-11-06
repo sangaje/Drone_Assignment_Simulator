@@ -130,15 +130,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
         - Not currently in a return-to-base leg, and
         - There is no active current task batch yet.
         """
-        if (
-            self._is_on_base
-            and not self._is_going_to_base
-            and len(self.task_queue) > 0
-        ):
+        if self._is_on_base and not self._is_going_to_base and len(self.task_queue) > 0:
             # Merge new queued tasks into the current batch while we are still at base
             self.current_tasks.extend(self.task_queue)
             self._deliveries_count += len(self.task_queue)
             self.task_queue.clear()
+
     """Autonomous delivery drone with intelligent routing and multi-state task coordination.
 
     DeliveryDrone is a concrete specialization of Drone[DeliveryTask] that implements
@@ -330,7 +327,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         [Docstring unchanged]
         """
-        if not self.is_operational() and not self._is_going_to_base:
+        if not self.is_operational():
             # 배터리 등 운용 불가: 기지로 회항
             if not self._is_on_base:
                 v = self.get_nearest_base()
@@ -339,39 +336,38 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self._start_flight(now)
             return
 
-        # 라운드 시작 시각 설정(기지 이탈 시 1회)
-        if self._start_travel_time is None:
-            self._is_on_base = False
-            self._start_travel_time = now
-
         # 1) 아직 픽업하지 않은 작업들(ASSIGNED 포함)을 모두 찾는다.
-        unpicked = [t for t in self.current_tasks if t.current_state < DeliveryState.SERVICE_PICKUP]
+        unpicked = [
+            t for t in self.current_tasks if t.current_state == DeliveryState.ASSIGNED
+        ]
 
         if unpicked:
             # 현재 위치 기준, 가장 가까운 origin으로 이동
-            target: DeliveryTask = min(unpicked, key=lambda t: self.position.distance_to(t.origin))
+            target: DeliveryTask = min(
+                unpicked, key=lambda t: self.position.distance_to(t.origin)
+            )
             self._current_mission = target
             self.current_destination = target.origin
             # 상태 전이: ASSIGNED -> SERVICE_PICKUP (비행 시작 전에 표식)
-            if target.current_state == DeliveryState.ASSIGNED:
-                target.next(now)
+            target.next(now)
             self._start_flight(now)
             return
 
         # 2) 모든 픽업이 끝났다면 드롭해야 할 작업들만 남는다.
         droppable = [
-            t for t in self.current_tasks
-            if (t.current_state >= DeliveryState.SERVICE_PICKUP) and (t.current_state < DeliveryState.DONE)
+            t
+            for t in self.current_tasks
+            if (t.current_state == DeliveryState.GO_DROPOFF)
         ]
 
         if droppable:
             # 현재 위치 기준, 가장 가까운 destination으로 이동
-            target: DeliveryTask = min(droppable, key=lambda t: self.position.distance_to(t.destination))
+            target: DeliveryTask = min(
+                droppable, key=lambda t: self.position.distance_to(t.destination)
+            )
             self._current_mission = target
             self.current_destination = target.destination
             # 상태 전이: SERVICE_PICKUP -> SERVICE_DROPOFF (비행 시작 전에 표식)
-            if target.current_state == DeliveryState.SERVICE_PICKUP:
-                target.next(now)
             self._start_flight(now)
             return
 
@@ -567,16 +563,24 @@ class DeliveryDrone(Drone[DeliveryTask]):
             • Scalable for high-frequency ground operation cycles
         """
 
-        def wait_for_pickup(current_mission: DeliveryTask):
-            if current_mission.current_state is DeliveryState.SERVICE_PICKUP:
-                if current_mission.pickup_time <= now:
+        def wait_for_pickup():
+            mission = self._current_mission
+            if mission and mission.current_state == DeliveryState.SERVICE_PICKUP:
+                if mission.pickup_time <= now:
                     self._pakage_count += 1
-                    current_mission.next(now)
+                    mission.next(now)
 
-        def wait_for_dropoff(current_mission: DeliveryTask):
-            if current_mission.current_state is DeliveryState.SERVICE_DROPOFF:
+        def wait_for_dropoff():
+            mission = self._current_mission
+            if mission and mission.current_state == DeliveryState.SERVICE_DROPOFF:
                 self._pakage_count -= 1
-                current_mission.next(now)
+                mission.next(now)
+                mission = self._current_mission
+
+            if mission and mission.current_state == DeliveryState.DONE:
+                if mission in self.current_tasks:
+                    self.current_tasks.remove(mission)
+                self._current_mission = None
 
         super().on_grounded(dt, now)
 
@@ -585,12 +589,21 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._load_all_tasks_from_queue()
 
         if self.current_destination is None:
-            if self._current_mission in DeliveryTask.ground_task():
-                wait_for_pickup(self._current_mission)
-                wait_for_dropoff(self._current_mission)
+
+            if (
+                self._current_mission and self._current_mission.current_state in DeliveryTask.ground_task()
+            ):
+                wait_for_pickup()
+                wait_for_dropoff()
                 return
 
             self._try_assign_new_destination(now)
+            if (
+                self._start_travel_time is None
+                and self._current_destination is not None
+            ):
+                self._is_on_base = False
+                self._start_travel_time = now
 
             return
 
@@ -733,23 +746,17 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._is_on_base = True
             battery_useage = self.battery.capacity - self.battery.current
             self.battery_usage_history.append(
-                (self._start_travel_time, now, battery_useage)
+                (self._start_travattery_useage)
             )
             self._start_travel_time = None
 
         super().enter_grounded(now)
-        if self._current_mission is not None:
+        if (
+            self._current_mission is not None
+            and self._current_mission.current_state
+            not in (DeliveryState.DONE, DeliveryState.ABORTED)
+        ):
             self._current_mission.next(now)
-
-            if self._current_mission.current_state == DeliveryState.SERVICE_DROPOFF:
-                self._current_mission.next(now)
-
-            if self._current_mission.current_state == DeliveryState.DONE:
-                self.current_tasks.remove(self._current_mission)
-                self._current_mission = None
-
-        # If we're at base and idle, atomically load all queued tasks into current_tasks
-        self._load_all_tasks_from_queue()
 
     def can_accept_task(self) -> bool:
         """Accept tasks while waiting at base (GROUNDED), block during return/flight.
@@ -758,13 +765,14 @@ class DeliveryDrone(Drone[DeliveryTask]):
         accepting tasks into task_queue; `_load_all_tasks_from_queue()` will merge
         them into `current_tasks` before takeoff.
         """
-        if self._is_going_to_base:
-            return False
-        # Allow accepting tasks only when actually on base and in GROUNDED state
-        return self._is_on_base and self.current_state == DroneState.GROUNDED
+        c1 = self._is_going_to_base or self._is_on_base
+        c2 = len(self.current_tasks) == 0 and len(self.task_queue) == 0
+        if c1 and c2:
+            return True
+        return False
 
     def assign(self, task):
-        if self.is_operational():
+        if self.is_operational() and self.can_accept_task():
             return super().assign(task)
         return False
 
@@ -776,6 +784,3 @@ class DeliveryDrone(Drone[DeliveryTask]):
     @property
     def is_busy(self) -> bool:
         return super().is_busy or self._is_going_to_base
-
-    def package_usage(self) -> int:
-        return len(self.current_tasks) + len(self.task_queue)

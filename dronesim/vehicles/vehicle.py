@@ -503,3 +503,7 @@ class Vehicle(ABC):
     @abstractmethod
     def is_operational(self) -> bool:
         pass
+    
+    @abstractmethod
+    def can_accept_task(self) -> bool:
+        pass
