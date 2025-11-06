@@ -608,12 +608,12 @@ class Simulator(ABC, Generic[V, T]):
 
             for task in self._temp_cooldown_tasks_queue:
                 self._cooldown_tasks_queue.append(task)
-                self._progress.advance(self._t_working, -1)
 
             self._temp_cooldown_tasks_queue.clear()
 
             for task in self._temp_working_tasks_queue:
                 self._working_tasks_queue.append(task)
+                self._progress.advance(self._t_working, 1)
 
             self._temp_working_tasks_queue.clear()
 
@@ -642,11 +642,11 @@ class Simulator(ABC, Generic[V, T]):
             task = self._cooldown_tasks_queue.popleft()
             self._temp_working_tasks_queue.append(task)
             # self._working_tasks_queue.append(task)
-            self._progress.advance(self._t_working)
+            # self._progress.advance(self._t_working)
             yield task
 
         while len(self._pending_tasks_queue) > 0:
-            self._progress.advance(self._t_working)
+            # self._progress.advance(self._t_working)
             task = self._pending_tasks_queue.popleft()
             self._temp_working_tasks_queue.append(task)
             # self._working_tasks_queue.append(task)

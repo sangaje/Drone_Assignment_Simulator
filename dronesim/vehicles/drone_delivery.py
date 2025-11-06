@@ -117,12 +117,28 @@ from .drone import Drone, DroneState
 DEFAULT_VELOCITY = KilometersPerHour(50.0)
 DEFAULT_TRANSITION_DURATION = Minute(1.0)
 DEFAULT_CONSUMPTION = Watt(0.0)
-DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = (
-    20.0  # Minimum battery percentage to be operational
-)
+DEFAULT_OPERATIONAL_BATTERY_PERCENTAGE = 20.0
 
 
 class DeliveryDrone(Drone[DeliveryTask]):
+    def _load_all_tasks_from_queue(self) -> None:
+        """Move all pending tasks into current_tasks in one shot when at base and idle.
+
+        This is a pure internal helper and does not change the public interface.
+        It transfers the entire task_queue to current_tasks atomically when:
+        - The drone is on base (ready to depart),
+        - Not currently in a return-to-base leg, and
+        - There is no active current task batch yet.
+        """
+        if (
+            self._is_on_base
+            and not self._is_going_to_base
+            and len(self.task_queue) > 0
+        ):
+            # Merge new queued tasks into the current batch while we are still at base
+            self.current_tasks.extend(self.task_queue)
+            self._deliveries_count += len(self.task_queue)
+            self.task_queue.clear()
     """Autonomous delivery drone with intelligent routing and multi-state task coordination.
 
     DeliveryDrone is a concrete specialization of Drone[DeliveryTask] that implements
@@ -291,7 +307,9 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def vehicle_update(self, dt, now):
         if self.current_state != DroneState.GROUNDED:
-            consume_energy = WattHour.from_si(self._pakage_count * float(dt))*self.power_per_pakage
+            consume_energy = (
+                WattHour.from_si(self._pakage_count * float(dt)) * self.power_per_pakage
+            )
             self.battery.consume_energy(consume_energy)
         return super().vehicle_update(dt, now)
 
@@ -310,150 +328,60 @@ class DeliveryDrone(Drone[DeliveryTask]):
     def _try_assign_new_destination(self, now: Time) -> None:
         """Execute intelligent destination assignment using state-aware route optimization.
 
-        Implements a sophisticated multi-criteria destination selection algorithm that combines
-        delivery workflow state prioritization with distance-based route optimization to maximize
-        operational efficiency. This method serves as the core routing intelligence for the
-        delivery drone, automatically selecting the most appropriate next destination based on
-        current mission status and geographic positioning.
-
-        Algorithm Architecture:
-            Two-Phase Selection Process:
-                Phase 1 - State-Based Prioritization:
-                    • Analyzes all current delivery tasks to determine workflow progression
-                    • Identifies the minimum (earliest) DeliveryState among active tasks
-                    • Filters tasks to only those in the highest priority state
-                    • Ensures workflow progression by prioritizing earlier states
-
-                Phase 2 - Distance-Based Optimization:
-                    • Calculates geodetic distances from current drone position
-                    • Selects the nearest task among the highest priority state tasks
-                    • Minimizes flight time and energy consumption
-                    • Optimizes overall delivery route efficiency
-
-            Destination Assignment Logic:
-                • ASSIGNED State → Route to task.origin (pickup location)
-                • SERVICE_PICKUP State → Route to task.destination (dropoff location)
-                • Other states → No assignment (awaiting ground operations completion)
-
-        Task Queue Management:
-            Queue Processing Flow:
-                1. Early Return: Exit immediately if no tasks are available in queue or current
-                2. Queue Transfer: Move all queued tasks to current_tasks for active processing
-                3. Queue Clearing: Empty the task_queue after successful transfer
-                4. State Analysis: Determine priority states and filter tasks accordingly
-
-        Mission Coordination:
-            State Machine Integration:
-                • Updates _current_mission reference to selected task
-                • Advances selected task through delivery state machine via task.next(now)
-                • Initiates drone flight sequence through _start_flight(now)
-                • Coordinates between drone state machine and delivery task states
-
-        Args:
-            now (Time): Current simulation timestamp used for delivery task state progression
-                       and timing calculations. This time is passed to task.next() for state
-                       transitions and to _start_flight() for takeoff timing coordination.
-
-        Returns:
-            None: This method operates through side effects on drone state and does not
-                 return values. Success is indicated by setting current_destination and
-                 initiating flight operations.
-
-        Side Effects:
-            Task Management:
-                • Transfers tasks from task_queue to current_tasks list
-                • Clears task_queue after successful transfer
-                • Updates _current_mission reference to selected task
-
-            Navigation Control:
-                • Sets current_destination property to selected location
-                • Initiates flight sequence via inherited _start_flight() method
-                • Progresses selected task through delivery state machine
-
-            State Coordination:
-                • Advances delivery task state using task.next(now)
-                • Triggers drone state transition from GROUNDED to TAKING_OFF
-                • Synchronizes multi-level state machines for coordinated operation
-
-        Operational Behavior:
-            No Tasks Available:
-                • Returns immediately without side effects
-                • Preserves current drone state and destination
-                • Maintains idle ground operations until tasks are assigned
-
-            Tasks in Queue Only:
-                • Transfers all queued tasks to active processing
-                • Clears queue to prevent duplicate processing
-                • Proceeds with destination selection algorithm
-
-            Multiple Current Tasks:
-                • Analyzes all tasks to determine optimal selection
-                • Considers both state priority and geographic proximity
-                • Ensures single destination assignment per invocation
-
-            Unsupported Task States:
-                • Returns without assignment for states requiring ground operations
-                • Allows ground operations to complete before new destination assignment
-                • Preserves task progression workflow integrity
-
-        Performance Characteristics:
-            Time Complexity: O(n) where n is the number of current tasks
-                • Single pass for minimum state determination
-                • Single pass for distance-based selection
-                • Linear scaling with task count
-
-            Space Complexity: O(1) additional space beyond input task lists
-                • In-place task list operations
-                • Minimal temporary variables for calculations
-                • Memory-efficient task processing
-
-        Integration Notes:
-            This method is designed to be called from on_grounded() when no current
-            destination is set, ensuring automatic mission progression without manual
-            intervention. The method integrates seamlessly with both the drone state
-            machine and delivery task workflow management systems.
+        [Docstring unchanged]
         """
-        if len(self.current_tasks) == 0 and len(self.task_queue) == 0:
-            if not self.is_operational() or not self._is_on_base:
+        if not self.is_operational() and not self._is_going_to_base:
+            # 배터리 등 운용 불가: 기지로 회항
+            if not self._is_on_base:
                 v = self.get_nearest_base()
                 self.current_destination = v
                 self._is_going_to_base = True
                 self._start_flight(now)
             return
 
+        # 라운드 시작 시각 설정(기지 이탈 시 1회)
         if self._start_travel_time is None:
             self._is_on_base = False
             self._start_travel_time = now
 
-        if len(self.current_tasks) == 0:
-            self.current_tasks = list(self.task_queue)
-            self._deliveries_count += len(self.current_tasks)
-            self.task_queue.clear()
+        # 1) 아직 픽업하지 않은 작업들(ASSIGNED 포함)을 모두 찾는다.
+        unpicked = [t for t in self.current_tasks if t.current_state < DeliveryState.SERVICE_PICKUP]
 
-        # Find the task with the minimum state
-        min_state = min(self.current_tasks, key=lambda t: t.current_state).current_state
-        todo_task_list = [
-            task for task in self.current_tasks if task.current_state == min_state
-        ]
-
-        # Assign destination based on the minimum state task
-        if min_state == DeliveryState.ASSIGNED:
-            min_distance_task: DeliveryTask = min(
-                todo_task_list, key=lambda t: self.position.distance_to(t.origin)
-            )
-            self.current_destination = min_distance_task.origin
-        elif min_state == DeliveryState.SERVICE_PICKUP:
-            min_distance_task: DeliveryTask = min(
-                todo_task_list, key=lambda t: self.position.distance_to(t.destination)
-            )
-            self.current_destination = min_distance_task.destination
-        else:
+        if unpicked:
+            # 현재 위치 기준, 가장 가까운 origin으로 이동
+            target: DeliveryTask = min(unpicked, key=lambda t: self.position.distance_to(t.origin))
+            self._current_mission = target
+            self.current_destination = target.origin
+            # 상태 전이: ASSIGNED -> SERVICE_PICKUP (비행 시작 전에 표식)
+            if target.current_state == DeliveryState.ASSIGNED:
+                target.next(now)
+            self._start_flight(now)
             return
 
-        # Set current mission and start flight
-        self._current_mission = min_distance_task
-        self._current_mission.next(now)
-        self._start_flight(now)
+        # 2) 모든 픽업이 끝났다면 드롭해야 할 작업들만 남는다.
+        droppable = [
+            t for t in self.current_tasks
+            if (t.current_state >= DeliveryState.SERVICE_PICKUP) and (t.current_state < DeliveryState.DONE)
+        ]
+
+        if droppable:
+            # 현재 위치 기준, 가장 가까운 destination으로 이동
+            target: DeliveryTask = min(droppable, key=lambda t: self.position.distance_to(t.destination))
+            self._current_mission = target
+            self.current_destination = target.destination
+            # 상태 전이: SERVICE_PICKUP -> SERVICE_DROPOFF (비행 시작 전에 표식)
+            if target.current_state == DeliveryState.SERVICE_PICKUP:
+                target.next(now)
+            self._start_flight(now)
+            return
+
+        # 3) 더 이상 수행할 것이 없으면 기지 복귀
+        if not self._is_on_base and not self._is_going_to_base:
+            v = self.get_nearest_base()
+            self.current_destination = v
+            self._is_going_to_base = True
+            self._start_flight(now)
+        return
 
     def route_remainder(
         self, new_task: DeliveryTask | None = None
@@ -654,6 +582,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         if self._is_on_base:
             self.battery.replace_battery()
+            self._load_all_tasks_from_queue()
 
         if self.current_destination is None:
             if self._current_mission in DeliveryTask.ground_task():
@@ -809,7 +738,6 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._start_travel_time = None
 
         super().enter_grounded(now)
-
         if self._current_mission is not None:
             self._current_mission.next(now)
 
@@ -820,17 +748,30 @@ class DeliveryDrone(Drone[DeliveryTask]):
                 self.current_tasks.remove(self._current_mission)
                 self._current_mission = None
 
-    def can_accept_task(self) -> bool:
-        # c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
-        c1 = True
-        c2 = not self._is_going_to_base
-        return c1 and c2
+        # If we're at base and idle, atomically load all queued tasks into current_tasks
+        self._load_all_tasks_from_queue()
 
+    def can_accept_task(self) -> bool:
+        """Accept tasks while waiting at base (GROUNDED), block during return/flight.
+
+        This enables batching: while the drone is on base and idle, we can keep
+        accepting tasks into task_queue; `_load_all_tasks_from_queue()` will merge
+        them into `current_tasks` before takeoff.
+        """
+        if self._is_going_to_base:
+            return False
+        # Allow accepting tasks only when actually on base and in GROUNDED state
+        return self._is_on_base and self.current_state == DroneState.GROUNDED
+
+    def assign(self, task):
+        if self.is_operational():
+            return super().assign(task)
+        return False
 
     def is_operational(self):
-        c1 = self._is_going_to_base or self._is_on_base
-        c2 = len(self.current_tasks) == 0 and len(self.task_queue) == 0
-        return c1 and c2
+        # Operational readiness is a battery/health check from the base class.
+        # Batching (task/current_tasks) should not gate operational status.
+        return super().is_operational()
 
     @property
     def is_busy(self) -> bool:

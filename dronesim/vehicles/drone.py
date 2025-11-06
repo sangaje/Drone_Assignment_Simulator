@@ -419,7 +419,7 @@ class Drone(Vehicle, Generic[T]):
         Args:
             task (T | None): The new task of type T or None to clear the current task.
         """
-        self._tasks_current = tasks
+        self._tasks_current = tasks.copy()
 
     @property
     def task_queue(self) -> deque[T]:
@@ -886,6 +886,6 @@ class Drone(Vehicle, Generic[T]):
         Returns:
             bool: True if the drone has current tasks assigned, False otherwise.
         """
-        return (self._tasks_current and len(self._tasks_current) > 0) or len(self.task_queue) > 0
+        return (self.current_tasks and len(self.current_tasks) > 0) or len(self.task_queue) > 0
 
 
