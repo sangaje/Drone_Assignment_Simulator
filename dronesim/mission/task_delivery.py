@@ -687,7 +687,7 @@ class DeliveryTask(Task):
         """
         if now:
             self._event_time[self.current_state] = now
-        
+
         self.transition_to(self._next[self.current_state])
         return self.current_state
 

@@ -105,6 +105,7 @@ Usage Examples:
         >>> # and task states, selecting nearest pickup/dropoff locations first
 """
 
+
 from collections.abc import Sequence
 
 from dronesim.energy import BatteryStatus
@@ -330,21 +331,45 @@ class DeliveryDrone(Drone[DeliveryTask]):
         return v
 
     def _try_assign_new_destination(self, now: Time) -> None:
-        """Execute intelligent destination assignment using state-aware route optimization.
+        """Assign next destination with precedence-safe interleaving of pickups and dropoffs.
 
-        [Docstring unchanged]
+        규칙:
+        - 동일 작업에 대해 드롭오프는 항상 픽업 이후(선후 제약 유지)
+        - 여러 작업이 섞여 있을 때는 현재 위치 기준으로
+          '가장 가까운 픽업 지점'과 '가장 가까운 드롭오프 지점'을 비교해 더 가까운 곳을 우선
+        - 픽업 후보가 없으면 드롭오프만, 드롭오프가 없으면 픽업만 고려
+        - 둘 다 없으면 기지 복귀
         """
-        # 1) 아직 픽업하지 않은 작업들(ASSIGNED 포함)을 모두 찾는다.
+        # 대기열을 현재 배치로 당겨오고 후보 계산
         self._load_all_tasks_from_queue()
+
         unpicked = [
             t for t in self.current_tasks if t.current_state < DeliveryState.GO_PICKUP
         ]
+        droppable = [
+            t for t in self.current_tasks if t.current_state == DeliveryState.GO_DROPOFF
+        ]
 
-        if unpicked:
-            # 현재 위치 기준, 가장 가까운 origin으로 이동
-            target: DeliveryTask = min(
-                unpicked, key=lambda t: self.position.distance_to(t.origin)
+        # 둘 다 있는 경우: 현재 위치에서 더 가까운 지점을 선택
+        if unpicked and droppable:
+            nearest_pick = min(unpicked, key=lambda t: self.position.distance_to(t.origin))
+            nearest_drop = min(
+                droppable, key=lambda t: self.position.distance_to(t.destination)
             )
+
+            d_pick = self.position.distance_to(nearest_pick.origin)
+            d_drop = self.position.distance_to(nearest_drop.destination)
+
+            target: DeliveryTask
+            go_drop = float(d_drop) < float(d_pick)
+            if go_drop:
+                target = nearest_drop
+                self._current_mission = target
+                self.current_destination = target.destination
+                self._is_dropping = True
+                self._start_flight(now)
+                return
+            target = nearest_pick
             self._current_mission = target
             self.current_destination = target.origin
             if target.current_state == DeliveryState.ASSIGNED:
@@ -352,26 +377,28 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._start_flight(now)
             return
 
-        # 2) 모든 픽업이 끝났다면 드롭해야 할 작업들만 남는다.
-        droppable = [
-            t
-            for t in self.current_tasks
-            if (t.current_state == DeliveryState.GO_DROPOFF)
-        ]
+        # 픽업만 있는 경우
+        if unpicked:
+            target = min(unpicked, key=lambda t: self.position.distance_to(t.origin))
+            self._current_mission = target
+            self.current_destination = target.origin
+            if target.current_state == DeliveryState.ASSIGNED:
+                target.next(now)
+            self._start_flight(now)
+            return
 
+        # 드롭오프만 있는 경우
         if droppable:
-            # 현재 위치 기준, 가장 가까운 destination으로 이동
-            target: DeliveryTask = min(
+            target = min(
                 droppable, key=lambda t: self.position.distance_to(t.destination)
             )
             self._current_mission = target
             self.current_destination = target.destination
-            # 상태 전이: SERVICE_PICKUP -> SERVICE_DROPOFF (비행 시작 전에 표식)
             self._is_dropping = True
             self._start_flight(now)
             return
 
-        # 3) 더 이상 수행할 것이 없으면 기지 복귀
+        # 더 이상 수행할 것이 없으면 기지 복귀
         if not self._is_on_base and not self._is_going_to_base:
             self._is_dropping = False
             self.current_destination = self.get_nearest_base()
@@ -384,180 +411,124 @@ class DeliveryDrone(Drone[DeliveryTask]):
     def estimate_mission_budget(
         self, new_task: DeliveryTask | Sequence[DeliveryTask]
     ) -> tuple[Length, Energy]:
-        """Estimate the total distance and energy required to complete the new task(s).
+        """Estimate total route cost (distance, energy) with one or more new tasks.
 
-        This method calculates the total distance and energy consumption for completing
-        the given delivery task(s) starting from the drone's current position. It considers
-        the optimal route covering all pickup and dropoff points.
-
-        Args:
-            new_task (DeliveryTask | Sequence[DeliveryTask]): A single delivery task or
-                a sequence of delivery tasks to estimate.
-
-        Returns:
-            tuple[Length, Energy]: A tuple containing the total distance (Length) and
-                estimated energy consumption (Energy) required to complete the tasks.
+        - Uses only current active tasks as baseline (excludes self.task_queue)
+        - Builds baseline via nearest-neighbor for pickups then dropoffs
+        - Inserts each new task's (origin, destination) by best 2-point insertion
+          to minimize total route length while preserving origin-before-destination
+        - Always returns (Length, Energy)
         """
-        # if not isinstance(new_task, Sequence):
-        #     new_tasks = [new_task]
-        # base = self.get_nearest_base()
+        # ---------------------------- Helpers ----------------------------
+        def _baseline_points() -> list[GeoPoint]:
+            """Build baseline route points from current position to base via tasks.
 
-        # pick_up_points = [
-        #     t.origin
-        #     for t in self.current_tasks
-        #     if t.current_state <= DeliveryState.GO_PICKUP
-        # ]
-        # pick_up_points.sort(key=lambda t: self.position.distance_to(t))
+            Route shape: [pos] -> pickups (unpicked tasks) -> dropoffs -> [nearest base]
+            Pickups and dropoffs are ordered greedily by nearest-neighbor.
+            """
+            pos = self.position
 
-        # drop_off_points = [
-        #     t.destination
-        #     for t in self.current_tasks
-        #     if t.current_state <= DeliveryState.GO_DROPOFF
-        # ]
-        # if len(pick_up_points) > 0:
-        #     drop_off_points.sort(key=lambda t: pick_up_points[-1].distance_to(t))
-        # else:
-        #     drop_off_points.sort(key=lambda t: self.position.distance_to(t))
+            # Tasks not yet picked: visit origin, then their destination later
+            pickups: list[GeoPoint] = [
+                t.origin for t in self.current_tasks if t.current_state < DeliveryState.SERVICE_PICKUP
+            ]
+            # Tasks already picked but not dropped: only visit destination
+            droppables: list[GeoPoint] = [
+                t.destination for t in self.current_tasks if t.current_state < DeliveryState.SERVICE_DROPOFF
+            ]
 
-        # new_pick_up_points: list[GeoPoint] = [t.origin for t in new_tasks]
-        # if len(drop_off_points) > 0:
-        #     new_pick_up_points.sort(key=lambda t: drop_off_points[-1].distance_to(t))
-        # else:
-        #     new_pick_up_points.sort(key=lambda t: self.position.distance_to(t))
+            route: list[GeoPoint] = [pos]
 
-        # new_drop_off_points: list[GeoPoint] = [t.destination for t in new_tasks]
-        # new_drop_off_points.sort(key=lambda t: new_pick_up_points[-1].distance_to(t))
+            # Greedy order for pickups from current position
+            remaining = pickups.copy()
+            last = pos
+            while remaining:
+                nxt = min(remaining, key=lambda p: last.distance_to(p))
+                route.append(nxt)
+                last = nxt
+                remaining.remove(nxt)
 
-        # d_distance = Kilometer(0)
-        # prev_point: GeoPoint = self.position
-        # for point in (
-        #     pick_up_points
-        #     + drop_off_points
-        #     + new_pick_up_points
-        #     + new_drop_off_points
-        #     + [base]
-        # ):
-        #     d_distance += prev_point.distance_to(point)
-        #     prev_point = point
+            # Greedy order for dropoffs from last pickup (or current pos if none)
+            remaining = droppables.copy()
+            while remaining:
+                nxt = min(remaining, key=lambda p: last.distance_to(p))
+                route.append(nxt)
+                last = nxt
+                remaining.remove(nxt)
 
-        # power_usage = self.power_transit + 0.5 * self.power_per_pakage * len(
-        #     self.current_tasks
-        # )
-        # e_energy = (
-        #     WattHour.from_si(float(d_distance) / float(self.velocity)) * power_usage
-        # )
-        # return d_distance, e_energy
-        # if not isinstance(new_task, Sequence):
-        #     new_tasks = [new_task]
-        # base = self.get_nearest_base()
+            # Always return to nearest base from last point
+            route.append(self.get_nearest_base(last))
+            return route
 
-        # pick_up_points: list[GeoPoint] = [t.origin for t in new_tasks]
-        # pick_up_points += [
-        #     t.origin
-        #     for t in self.current_tasks
-        #     if t.current_state <= DeliveryState.GO_PICKUP
-        # ]
-        # pick_up_points.sort(key=lambda t: self.position.distance_to(t))
+        def _route_length(points: list[GeoPoint]) -> Length:
+            total: Length = Kilometer(0)
+            prev = points[0]
+            for p in points[1:]:
+                total += prev.distance_to(p)
+                prev = p
+            return total
 
-        # drop_off_points: list[GeoPoint] = [t.destination for t in new_tasks]
-        # drop_off_points += [
-        #     t.destination
-        #     for t in self.current_tasks
-        #     if t.current_state <= DeliveryState.GO_DROPOFF
-        # ]
-        # drop_off_points.sort(key=lambda t: pick_up_points[-1].distance_to(t))
-        # d_distance = Kilometer(0)
-        # # prev_point: GeoPoint = (
-        # #     self._picked_up_points[-1] if self._picked_up_points else self.position
-        # # )
-        # # for point in pick_up_points + drop_off_points + [base]:
-        # #     d_distance += prev_point.distance_to(point)
-        # #     prev_point = point
+        def _insert_best(points: list[GeoPoint], a: GeoPoint, b: GeoPoint) -> list[GeoPoint]:
+            """Insert points a (origin) and b (destination) before base to minimize route.
 
-        # prev_point: GeoPoint = self.position
-        # for point in pick_up_points + drop_off_points + [base]:
-        #     d_distance += prev_point.distance_to(point)
-        #     prev_point = point
+            Keeps a before b and never inserts after base. Brute-force over O(n^2) pairs
+            with small n is acceptable and robust for our simulator scales.
+            """
+            best: list[GeoPoint] | None = None
+            best_len: Length | None = None
 
-        # power_usage = self.power_transit + 0.5 * self.power_per_pakage * len(
-        #     self.current_tasks
-        # )
-        # e_energy = (
-        #     WattHour.from_si(float(d_distance) / float(self.velocity)) * power_usage
-        # )
+            # Base is at the last index; we don't insert after it
+            base_idx = len(points) - 1
+            # allow insertion right before base as well
+            for i in range(1, base_idx + 1):  # insert 'a' between points[i-1] and points[i]
+                # Insert a at i
+                with_a = points[:i] + [a] + points[i:]
+                # After inserting a, base moved by +1 index
+                new_base_idx = base_idx + 1
+                # Insert 'b' after 'a' and at or before base
+                for j in range(i + 1, new_base_idx + 1):  # 'b' before or at base index
+                    new_points = with_a[:j] + [b] + with_a[j:]
+                    d = _route_length(new_points)
+                    if best is None or float(d) < float(best_len):
+                        best = new_points
+                        best_len = d
 
-        # total_distance = Kilometer(0)
+            # Fallback: append before base if loops didn't run (very short routes)
+            if best is None:
+                best = points[:-1] + [a, b] + [points[-1]]
+                best_len = _route_length(best)
+            return best
 
-        # total_route = (
-        #     # self._picked_up_points +
-        #     pick_up_points +
-        #     # self._droped_off_points +
-        #     drop_off_points +
-        #     [base]
-        # )
-        # prev_point = base
-        # for point in total_route:
-        #     total_distance += prev_point.distance_to(point)
-        #     prev_point = point
-        # return total_distance, e_energy
-        pick_up_points: list[GeoPoint] = []
-        drop_off_points: list[GeoPoint] = []
-        if len(self.current_tasks) > 0:
-            for task in self.current_tasks:
-                if task.current_state < DeliveryState.SERVICE_PICKUP:
-                    pick_up_points.append(task.origin)
+        # ---------------------------- Main logic ----------------------------
+        baseline = _baseline_points()
 
-                if task.current_state < DeliveryState.SERVICE_DROPOFF:
-                    drop_off_points.append(task.destination)
-
+        # Normalize input to a list of tasks
+        if isinstance(new_task, Sequence):
+            tasks_to_insert = list(new_task)
         else:
-            if len(self.task_queue) == 0 and new_task is None:
-                return (
-                    self.get_nearest_base().distance_to(self.position),
-                    self.position,
-                )
+            tasks_to_insert = [new_task]
 
-        pick_up_points.sort(key=lambda t: self.position.distance_to(t))
-        if len(pick_up_points) > 0:
-            drop_off_points.sort(key=lambda t: pick_up_points[-1].distance_to(t))
-        else:
-            drop_off_points.sort(key=lambda t: self.position.distance_to(t))
+        # Greedy multi-task insertion: each step choose the task with minimal added cost
+        route = baseline
+        remaining = tasks_to_insert.copy()
+        while remaining:
+            best_idx = 0
+            best_route = None
+            best_len = None
+            for idx, t in enumerate(remaining):
+                candidate = _insert_best(route, t.origin, t.destination)
+                d = _route_length(candidate)
+                if best_route is None or float(d) < float(best_len):
+                    best_route = candidate
+                    best_len = d
+                    best_idx = idx
+            # adopt best candidate and remove that task
+            route = best_route
+            del remaining[best_idx]
 
-        new_pick_up_points: list[GeoPoint] = []
-        new_drop_off_points: list[GeoPoint] = []
+        total_distance = _route_length(route)
 
-        for task in self.task_queue:
-            new_pick_up_points.append(task.origin)
-            new_drop_off_points.append(task.destination)
-
-        if new_task:
-            new_pick_up_points.append(new_task.origin)
-            new_drop_off_points.append(new_task.destination)
-
-        if len(drop_off_points) > 0:
-            new_pick_up_points.sort(key=lambda t: drop_off_points[-1].distance_to(t))
-        else:
-            new_pick_up_points.sort(key=lambda t: self.position.distance_to(t))
-
-        if len(new_pick_up_points) > 0:
-            new_drop_off_points.sort(
-                key=lambda t: new_pick_up_points[-1].distance_to(t)
-            )
-        else:
-            new_drop_off_points.sort(key=lambda t: self.position.distance_to(t))
-
-        route: list[GeoPoint] = [self.position] + pick_up_points + drop_off_points
-        route += new_pick_up_points + new_drop_off_points
-        route += [self.get_nearest_base(route[-1])]
-        total_distance: Length = Kilometer(0)
-
-        prev_point: GeoPoint = None
-        for point in route:
-            if prev_point is None:
-                total_distance += self.position.distance_to(point)
-            else:
-                total_distance += prev_point.distance_to(point)
-            prev_point = point
+        # Energy estimate: transit-only consumption over travel time
         time = float(total_distance) / float(self.velocity)
         total_energy = WattHour.from_si(float(self.power_transit) * time)
         return total_distance, total_energy
@@ -866,21 +837,12 @@ class DeliveryDrone(Drone[DeliveryTask]):
             self._current_mission.next(now)
 
     def can_accept_task(self) -> bool:
-        """Accept tasks while waiting at base (GROUNDED), block during return/flight.
+        """Accept tasks when operational and not returning to base.
 
-        This enables batching: while the drone is on base and idle, we can keep
-        accepting tasks into task_queue; `_load_all_tasks_from_queue()` will merge
-        them into `current_tasks` before takeoff.
+        Keeps names/flow intact: we allow queueing while idle or working,
+        but block acceptance during explicit return-to-base legs to reduce churn.
         """
-        # c1 = self._is_going_to_base or self._is_on_base
-        # c1 = not(self._is_dropping or self._is_going_to_base)
-        c1 = True
-        # c1 = not self._is_dropping
-        # c2 = len(self.current_tasks) == 0 and len(self.task_queue) == 0
-        # if c1 and c2:
-        if c1 and self.is_operational():
-            return True
-        return False
+        return (not self._is_going_to_base) and self.is_operational()
 
     def assign(self, task, now=Minute(0)) -> bool:
         if self.can_accept_task():

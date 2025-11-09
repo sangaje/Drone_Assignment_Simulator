@@ -581,7 +581,7 @@ class Task(ABC):
             constructors to ensure proper initialization of base class attributes.
         """
         if id is None:
-            self.id = id(self)
+            self.id = __builtins__["id"](self)
         else:
             self.id = id
 
@@ -1034,3 +1034,4 @@ class Task(ABC):
             self._priority = value
         else:
             self._priority = 1
+        # self._priority = value

@@ -397,10 +397,6 @@ class Drone(Vehicle, Generic[T]):
         Args:
             destination (GeoPoint | None): The new destination point or None to clear.
         """
-        if self._current_destination is not None:
-            msg = "Current destination is already set."
-            raise ValueError(msg)
-
         self._current_destination = destination
 
     @property
@@ -431,7 +427,8 @@ class Drone(Vehicle, Generic[T]):
         return self._task_queue
 
     def _start_flight(self, now: Time) -> None:
-        self.transition_to(DroneState.TAKING_OFF, now)
+        if self.current_state == DroneState.GROUNDED:
+            self.transition_to(DroneState.TAKING_OFF, now)
 
     def _go_to_destination(self, dt: Time) -> bool:
         """Move the drone towards its current destination and check for arrival.
@@ -472,7 +469,7 @@ class Drone(Vehicle, Generic[T]):
             start_point=self.position,
             target=self._current_destination,
         ):
-            self.position = self._current_destination
+            self.position = self.current_destination
             self._current_destination = None
             return True
 

@@ -548,6 +548,7 @@ class Simulator(ABC, Generic[V, T]):
                 list(self._pending_tasks_queue)
                 + list(self._working_tasks_queue)
                 + list(self._completed_tasks_queue)
+                + list(self._cooldown_tasks_queue)
             ):
                 task_state_counts[task.current_state] += 1
             for state, text in self._temp_task_texts.items():
@@ -568,17 +569,17 @@ class Simulator(ABC, Generic[V, T]):
             for state, text in self._temp_vehicle_texts.items():
                 text.plain = str(vehicle_state_counts[state])
 
-            if len(self._completed_tasks_queue) == 0:
+            if len(self._completed_tasks_queue) <= 50:
                 self._task_time_mean.plain = "--:--:--"
                 self._task_time_std.plain = "--:--:--"
 
             else:
                 start_times = np.asarray(
                     [float(task.start_at) for task in self._completed_tasks_queue]
-                )
+                )[-50:-1]
                 end_times = np.asarray(
                     [float(task.completed_at) for task in self._completed_tasks_queue]
-                )
+                )[-50:-1]
 
                 d_times = end_times - start_times
                 mean = ClockTime(np.mean(d_times))
