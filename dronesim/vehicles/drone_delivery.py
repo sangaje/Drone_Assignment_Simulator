@@ -157,66 +157,100 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
     def estimate_mission_budget(
         self, new_tasks: DeliveryTask | Sequence[DeliveryTask]
-    ) -> tuple[Length, Energy, list[Length]]:
+    ) -> tuple[Length, Energy, list[tuple[DeliveryTask, Length]]]:
         """Estimate remaining (distance, energy) including optional new_task.
 
         - Builds a simple greedy route from current position:
           pending pickups → pending dropoffs → nearest base.
         - If `new_task` is provided, appends its (origin, destination).
         - Includes tasks currently in `task_queue` for a conservative estimate.
+
         """
         new_tasks = new_tasks if isinstance(new_tasks, Sequence) else [new_tasks]
 
         # 1) 현재 작업에서 픽업/드롭 지점 수집
-        pick_up_points: list[GeoPoint] = [
-            t.origin
+        pick_up_points: list[tuple[DeliveryTask, GeoPoint]] = [
+            (t, t.origin)
             for t in self.current_tasks
             if t.current_state < DeliveryState.SERVICE_PICKUP
         ]
-        drop_off_points: list[GeoPoint] = [
-            t.destination
+        drop_off_points: list[tuple[DeliveryTask, GeoPoint]] = [
+            (t, t.destination)
             for t in self.current_tasks
             if t.current_state < DeliveryState.SERVICE_DROPOFF
         ]
 
         # 2) 현재 작업의 경로 정렬(기존 규칙 그대로)
         if pick_up_points:
-            pick_up_points.sort(key=lambda t: self.position.distance_to(t))
-            drop_off_points.sort(key=lambda t: pick_up_points[-1].distance_to(t))
+            pick_up_points.sort(key=lambda t: self.position.distance_to(t[1]))
+            drop_off_points.sort(key=lambda t: pick_up_points[-1][1].distance_to(t[1]))
         else:
-            drop_off_points.sort(key=lambda t: self.position.distance_to(t))
+            drop_off_points.sort(key=lambda t: self.position.distance_to(t[1]))
 
         # 3) 신규/대기 작업에서 사후 경유지 후보 수집
-        post_pick_up_points: list[GeoPoint] = [t.origin for t in new_tasks + list(self.task_queue)]
-        post_drop_off_points: list[GeoPoint] = [t.destination for t in new_tasks + list(self.task_queue)]
+        post_pick_up_points: list[tuple[DeliveryTask, GeoPoint]] = [
+            (t, t.origin) for t in new_tasks + list(self.task_queue)
+        ]
+        post_drop_off_points: list[tuple[DeliveryTask, GeoPoint]] = [
+            (t, t.destination) for t in new_tasks + list(self.task_queue)
+        ]
 
         # 4) [중요 변경] 사후 '픽업' 정렬 피벗을 통일
         #    드롭오프가 하나라도 있으면 마지막 드롭오프, 아니면 현재 위치
-        pivot_for_new_pickups: GeoPoint = drop_off_points[-1] if drop_off_points else self.position
-        post_pick_up_points.sort(key=lambda t: pivot_for_new_pickups.distance_to(t))
+        pivot_for_new_pickups: GeoPoint = (
+            drop_off_points[-1][1] if drop_off_points else self.position
+        )
+        post_pick_up_points.sort(key=lambda t: pivot_for_new_pickups.distance_to(t[1]))
 
         # 5) 사후 '드롭오프'는 마지막 사후 픽업을 기준으로 정렬(동일)
         if post_pick_up_points:
-            post_drop_off_points.sort(key=lambda t: post_pick_up_points[-1].distance_to(t))
+            post_drop_off_points.sort(
+                key=lambda t: post_pick_up_points[-1][1].distance_to(t[1])
+            )
         else:
             # 사후 픽업이 전혀 없을 때의 안전 기준(희소 케이스)
-            post_drop_off_points.sort(key=lambda t: pivot_for_new_pickups.distance_to(t))
+            post_drop_off_points.sort(
+                key=lambda t: pivot_for_new_pickups.distance_to(t[1])
+            )
 
         # 6) 최종 경로 구성
-        route: list[GeoPoint] = pick_up_points + drop_off_points
+        route: list[tuple[DeliveryTask, GeoPoint]] = pick_up_points + drop_off_points
         route += post_pick_up_points + post_drop_off_points
-        route += [self.get_nearest_base(route[-1])]
+        route += [(None, self.get_nearest_base(route[-1][1]))]
 
         # 7) 총거리/에너지 계산(기존과 동일한 모델)
         total_distance: Length = Kilometer(0)
+        drop_off_distances: list[Length] = []
         prev_point: GeoPoint = self.position
-        for point in route:
-            total_distance += prev_point.distance_to(point)
-            prev_point = point
 
-        time = float(total_distance) / float(self.velocity)
-        total_energy = WattHour.from_si(float(self.power_transit + 1.0 * self.power_per_pakage) * time)
-        return total_distance, total_energy
+        for task, point in pick_up_points:
+            total_distance += prev_point.distance_to(point)
+
+        for task, point in drop_off_points:
+            total_distance += prev_point.distance_to(point)
+            drop_off_distances.append((task, total_distance))
+
+        if self._is_going_to_base:
+            total_distance += prev_point.distance_to(self.get_nearest_base(prev_point))
+            unused_battery_distance = total_distance
+            prev_point = self.get_nearest_base(prev_point)
+        else:
+            unused_battery_distance = Kilometer(0)
+
+        for task, point in post_pick_up_points:
+            total_distance += prev_point.distance_to(point)
+
+        for task,point in post_drop_off_points:
+            total_distance += prev_point.distance_to(point)
+            drop_off_distances.append((task, total_distance))
+
+        total_distance += prev_point.distance_to(self.get_nearest_base(prev_point))
+
+        time = float(total_distance - unused_battery_distance) / float(self.velocity)
+        total_energy = WattHour.from_si(
+            float(self.power_transit + 1.0 * self.power_per_pakage) * time
+        )
+        return total_distance, total_energy, drop_off_distances
 
     def on_grounded(self, dt: Time, now: Time) -> None:
         """Handle ground services and assign next destination when idle.
@@ -227,7 +261,7 @@ class DeliveryDrone(Drone[DeliveryTask]):
 
         def wait_for_pickup(current_mission: DeliveryTask):
             if current_mission.current_state is DeliveryState.SERVICE_PICKUP:
-                #TODO : check pickup time
+                # TODO : check pickup time
                 if current_mission.pickup_time <= now:
                     self._pakage_count += 1
                     self._current_mission.next(now)
@@ -283,7 +317,8 @@ class DeliveryDrone(Drone[DeliveryTask]):
         """Return True if drone is operational and not returning to base."""
         # c1 = (self._deliveries_count + len(self.task_queue)) <= self._deliveries_per_charge
         c1 = True
-        c2 = not self._is_going_to_base
+        c2 = True
+        # c2 = not self._is_going_to_base
         return c1 and c2 and self.is_operational()
 
     def assign(self, task):
