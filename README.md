@@ -185,53 +185,53 @@
 - $y_j\in\{0,1\}$: $j$를 드롭(유예)하면 1
 
 **목적함수(최소화)**
-$$
+\[
 \min\ \sum_{i\in I}\sum_{j\in J}\big(\alpha\,\bar d_{ij}+\beta\,\bar e_{ij}-\gamma\,\bar A_j\big)\,x_{ij}
 \;+\;\sum_{j\in J}\rho_j\,y_j
-$$
+\]
 
 **제약식**
 
 1) 할당/드롭 배타성  
-$$
+\[
 \forall j\in J:\ \sum_{i\in I} x_{ij} + y_j = 1
-$$
+\]
 
 2) 용량(동시 수행 1개 가정)  
-$$
+\[
 \forall i\in I:\ \sum_{j\in J} x_{ij} \le 1
-$$
+\]
 
 3) 배터리(안전 여유 반영)  
-$$
+\[
 \forall i\in I:\ \sum_{j\in J} e_{ij}\,x_{ij} \le (1-\sigma)\,E_i^{\max}
-$$
+\]
 
 4) 범위 게이트  
-$$
+\[
 \forall i\in I,\ \forall j\in J:\ x_{ij} \le w_{ij}
-$$
+\]
 
 **드롭 의사결정(직관)**
-$$
+\[
 \rho_j \;<\; \min_{i\in I}\big\{\alpha\,\bar d_{ij}+\beta\,\bar e_{ij}-\gamma\,\bar A_j\big\}
 \;\Rightarrow\; \text{태스크 } j \text{ 드롭이 유리}
-$$
+\]
 
 ### 핵심 하이퍼파라미터(예시)
 
-$$
+\[
 \begin{aligned}
 \alpha,\ \beta,\ \gamma &= 3.0,\ 1.0,\ 2.0 &&\text{(거리, 에너지, 우선순위 가중치)}\\[2pt]
 \sigma &= 0.20 &&\text{(배터리 안전 마진)}\\[2pt]
-\rho &\approx 1.3\,\sqrt{\alpha+\beta+\gamma}
-     \approx 1.3\,\sqrt{6}
-     \approx 3.1843 &&\text{(드롭 페널티)}\\[2pt]
+\rho &\approx 1.3\,\sqrt{\alpha+\beta+\gamma} \\
+ &\approx 1.3\,\sqrt{6} \\
+ &\approx 3.1843 &&\text{(드롭 페널티)}\\[2pt]
 B &= 0 &&\text{(배치 크기: 모든 대기 태스크 동시 고려)}\\[2pt]
 \Delta t_{\text{wait}} &= 1\,\mathrm{min} &&\text{(배치 간 대기시간)}\\[2pt]
 T_{\text{limit}} &= 60\,\mathrm{s} &&\text{(MILP 솔버 시간 제한)}
 \end{aligned}
-$$
+\]
 
 ### 3.2 Optimal Distance 전략
 
